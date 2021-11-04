@@ -1,0 +1,1394 @@
+{% extends "base.html" %}
+
+{% block title %}Remote Control{% end %}
+
+
+{% block style %}
+<link rel="stylesheet" href="{{static_url('css/xterm.min.css')}}">
+<link rel="stylesheet" href="{{static_url('css/fullscreen.min.css')}}">
+<link rel="stylesheet" href="{{static_url('vendor/vue-json-viewer/style.css')}}">
+<style>
+  html,
+  body,
+  #content-wrapper {
+    height: 100%;
+  }
+
+  #content-wrapper {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #app {
+    display: flex;
+    flex-grow: 1;
+    min-height: 0%;
+  }
+
+  .height100 {
+    height: 100%;
+  }
+
+  .height-auto-fill {
+    height: -webkit-fill-available;
+  }
+
+  .flex-reset {
+    min-height: 0%;
+  }
+
+  .grow-0 {
+    flex-grow: 0;
+  }
+
+  .grow-1 {
+    flex-grow: 1;
+  }
+
+  .nopadding {
+    padding: 0px;
+  }
+
+  .cursor-pointer {
+    cursor: pointer;
+  }
+
+  .color-wrong {
+    color: red;
+  }
+
+  .debugarea {
+    /* background-color: #ddd; */
+    border: 1px solid red;
+  }
+
+  .screen {
+    position: relative;
+    background-color: gray;
+  }
+
+  .canvas-fg {
+    z-index: 20;
+    position: absolute;
+  }
+
+  .canvas-bg {
+    z-index: 10;
+  }
+  .xterm-wrapper {
+    line-height: 1.2;
+    font-size: 12px;
+    font-family: 'Courier New', Courier, monospace;
+    height: 30em;
+  }
+
+  .terminal {
+    border: 5px solid black;
+  }
+  .bottom-gutter {
+    margin-bottom: 10px;
+  }
+
+  .finger {
+    position: absolute;
+    border-style: solid;
+    border-radius: 50%;
+    border-color: white;
+    border-width: 1mm;
+    width: 6mm;
+    height: 6mm;
+    top: -3mm;
+    left: -3mm;
+    opacity: 0.7;
+    pointer-events: none;
+    background: red;
+    z-index: 200;
+    display: none;
+  }
+
+  .finger-1 {
+    background-color: blue;
+  }
+
+  .finger.active {
+    display: block;
+  }
+
+  .finger.longClick {
+    border: 1mm solid rebeccapurple;
+  }
+
+  .card-columns {
+    column-count: 2;
+  }
+</style>
+{% end %}
+
+{% block nav %}
+<nav class="navbar sticky-top navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">
+      <span class="title">ATXServer2</span></a>
+    </a>
+    <div class="collapse navbar-collapse" id="navbarNavDropdown">
+      <div class="navbar-nav">
+        <a class="nav-item nav-link active" href="/">
+          <i class="fab fa-apple"></i> iPhone</a>
+        <!-- <a class="nav-item nav-link active" href='/'> -->
+        <!-- </a> -->
+      </div>
+      <div class="navbar-nav navbar-right ml-auto">
+        <!-- <div class="nav-item">
+          <a  href = "/devices/{{udid}}/remotecontrolproxy">use proxy</a>
+        </div> -->
+        <div class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownMenuLink" data-toggle="dropdown"
+            aria-haspopup="true" aria-expanded="false">
+            {{current_user.email}}
+          </a>
+          <div class="dropdown-menu" aria-labelledby="navbarDropdownMenuLink">
+            <a class="dropdown-item" href="/user">Profile</a>
+            <a class="dropdown-item" href="/logout">Logout</a>
+          </div>
+        </div>
+        <form class="form-inline">
+          <button class="btn btn-warning" type="button" @click="stopUsing">Release</button>
+          <span ref="usingTime" class="navbar-text" style="margin-left: 1em">
+            Utilization
+          </span>
+        </form>
+      </div>
+    </div>
+
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavDropdown"
+      aria-controls="navbarNavDropdown" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+  </div>
+</nav>
+{% end %}
+
+
+{% block content %}
+<div class="container-fluid d-flex flex-column">
+  <div class="row grow-1 flex-reset">
+    <div class="col-sm debugarea d-flex flex-column justify-content-center nopadding grow-0 height-auto-fill">
+      <section class="debugarea" style="height: 2rem; line-height: 2rem; padding: 0 10px; justify-self: start">
+        <span>
+        </span>
+        <span>
+          <i class="fas fa-mobile-alt cursor-pointer" :class='{"fa-rotate-90": landscape}'>{{udid}}</i>
+        </span>
+      </section>
+      <!-- screen body -->
+      <section ref="bgCanvas" class="screen debugarea d-flex grow-1 align-items-center justify-content-center flex-reset"
+        style="flex-basis: 0%; line-height: 0px; max-width:400px;max-height:1000px;">
+        <!-- <canvas ref="fgCanvas" class="canvas-fg" v-bind:style="canvasStyle"></canvas> -->
+        <!-- <canvas ref="bgCanvas" class="canvas-bg" v-bind:style="canvasStyle"></canvas>
+        <span class="finger finger-0" style="transform: translate3d(200px, 100px, 0px)"></span>
+        <span class="finger finger-1" style="transform: translate3d(200px, 100px, 0px)"></span> -->
+        <!-- <img style="z-index: 10" v-if="loading" src="/assets/loading.svg"> -->
+      </section>
+      <section class="footer d-flex justify-content-around debugarea">
+        <button class="btn btn-default grow-1" @click="pressHome">
+          <i class="fas fa-home"></i>
+        </button>
+      </section>
+    </div>
+    <div class="col-sm debugarea height-auto-fill flex-reset" style="overflow-y: auto">
+      <el-tabs v-model="activeName" @tab-click="handleTabClick">
+        <el-tab-pane label="Common" name="common">
+          <div class="card-columns">
+            <div class="card">
+              <div class="card-header">
+                <i class="fab fa-angellist"></i> Common Functions
+                <span style="font-size: 0.7em; padding-top: 5px; color: gray">Tips: Could not select promopts by click on iOS</span>
+              </div>
+              <div class="card-body">
+                <el-button size="mini" @click="toggleRecord">
+                  <i class="fas fa-video"
+                :style="{color: recordingColor()}">Start/Stop Record Mobile Screen</i>
+                </el-button>
+                <el-button size="mini" @click="hotfix">
+                  <i class="fas fa-hammer"></i>
+                  Fix rotate
+                </el-button>
+                <el-button size="mini" @click="screenshot">Take Snapshot</el-button>
+
+                <el-button size="mini" :loading="alert.loading" @click="chooseAlertButtons">
+                  Choose Alert Buttons
+                </el-button>
+                <el-dialog title="Alert Options" :visible.sync="alert.visible">
+                  <span style="padding: 5px" v-for="v in alert.buttons">
+                    <el-button round size="small" @click="alertAccept(v); alert.visible=false">{{!v}}</el-button>
+                  </span>
+                </el-dialog>
+
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <i class="fas fa-bolt"></i> Shortcuts
+              </div>
+              <div class="card-body">
+                <el-button round size="small" @click="appOpen('com.apple.Preferences')">
+                  <i class="el-icon-setting"></i>
+                  Configuration
+                </el-button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <i class="fas fa-bug"></i> Debug Information
+              </div>
+              <div class="card-body">
+                <dl>
+                  <dt>Display</dt>
+                  <dd><code>{{!display.width}}x{{!display.height}}</code></dd>
+                  <dt>SessionID</dt>
+                  <dd><code v-text="session.id"></code></dd>
+                  <dt>FPS/Frames</dt>
+                  <dd>
+                    <code v-text="display.fps"></code>
+                    /
+                    <small><code v-text="session.frameCount"></code></small>
+                  </dd>
+                  <dt>WDA URL</dt>
+                  <dd>
+                    <!-- <code v-text="source.wdaUrl"></code>
+                    <i :data-clipboard-text="source.wdaUrl" class="far fa-copy clipboard-copy cursor-pointer"></i> -->
+                    <code v-text="wdaUrl"></code>
+                    <i :data-clipboard-text="wdaUrl" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                  <dt>Appium Remote URI</dt>
+                  <dd><code v-text="appiumUri"></code>
+                    <i :data-clipboard-text="appiumUri" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                  <dd><code v-text="appiumCaps"></code>
+                    <i :data-clipboard-text="appiumCaps" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <i class="fas fa-cubes"></i> Package management 
+              </div>
+              <div class="card-body">
+                <!-- <el-button>Accept(TODO)</el-button> -->
+                <div style="padding: 10px">
+                  <el-upload ref="upload" drag accept=".ipa" action="/uploads" :on-success="onUpload"
+                    :on-preview="onUploadSelect">
+                    <i class="el-icon-upload"></i>
+                    <div class="el-upload__text">Drag here to upload or <em>Choose file</em></div>
+                    <div class="el-upload__tip" slot="tip">ipa file only, up to 2G limited</div>
+                  </el-upload>
+                  <div class="form-group">
+                    <label>URL</label>
+                    <input type="text" placeholder="http://..." v-model="app.url" class="form-control form-control-sm">
+                  </div>
+                  <el-button @click="appInstall" :loading="!app.finished" :disabled="!app.finished || !app.url"
+                    size="small">Install App</el-button>
+                  <hr v-if="!!app.message">
+                  <pre style="white-space: normal" v-text="app.message"></pre>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="Terminal" name="terminal">
+          <p><b style="color:red;">Don't run cmd that never end e.g. 'ping localhost', if you do that, and want to terminate the cmd, click the  <button class="btn btn-warning" type="button" @click="stopUsing">Release</button> button</b></p>
+          <div ref="xterm" class="xterm-wrapper mb-5"></div>
+          <div>
+            <strong>Frequently Used Cmds</strong>
+            <ul>
+              <li>List Apps
+                <term-snippet :term="term" command="applist" />
+              </li>
+              <li>Show Running App list
+                <term-snippet :term="term" command="ps" />
+              </li>
+              <li>Run XCTest
+                <term-snippet :term="term" command="xctest -B com.facebook.wda.WebDriverAgent.Runner" />
+              </li>
+              <li>More cmds refer to  <a href="https://github.com/alibaba/taobao-iphone-device/blob/main/README_EN.md" target="_blank">TIDEVICE</a>
+              </li>
+            </ul>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="Unicorn" name = "unicorn">
+          <el-tabs v-model="unicorn.activeName" @tab-click = "handleUnicornSteps" tab-position="left">
+            <el-tab-pane label="Choose File or Folder" name="chooseFeature" :disabled="unicorn.flowControl.chooseFeature">
+              <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+                <el-button size="mini" type="primary" @click="getUnicornFile('/features')">Return Unicorn Root Folder</el-button>
+                <el-button size="mini" type="primary" @click="getUnicornFile('..')">Up</el-button>
+                <el-input size="mini" v-model="unicorn.selectedDir" placeholder="Target Directory" :disabled="true">
+                  <template slot="prepend">Feature Files</template>
+                </el-input>
+                <el-table size="mini" :data="unicorn.fileOrFolders">
+                  <el-table-column label="File Name ( Doublc Click to select the folder)">
+                    <template slot-scope="scope">
+                      <div width="100%" @dblclick="getUnicornFile(`${scope.row}`)">
+                        <span v-text="scope.row"></span>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div><el-button size="mini" type="primary" @click="unicorn.flowControl.chooseTag=false;unicorn.activeName='chooseTag';loadUnicornTags(unicorn.selectedDir)" :disabled="!unicorn.enableNext()">Next</el-button></div>
+              </div> 
+            </el-tab-pane>
+            <el-tab-pane label="choose tag to run" name="chooseTag" :disabled="unicorn.flowControl.chooseTag">
+              <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+                <el-table size="mini" :data="unicorn.tags" @selection-change="updateSelectedTags">
+                  <el-table-column type="selection" width="55"></el-table-column>
+                  <el-table-column label="tags" prop="value" sortable>
+                    <template slot-scope="scope">
+                      <span v-text="scope.row"></span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div><el-button size="mini" type="primary" @click="unicorn.activeName='runCase';loadUnicornCmd()" :disabled="!unicorn.enableNext()">Next</el-button></div>
+              </div> 
+            </el-tab-pane>
+            <el-tab-pane label="Review and Run Case" name="runCase" :disabled="unicorn.flowControl.runCase">
+              <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+                <textarea v-model="unicorn.previewCmd" style="width:100%;min-height:100px"></textarea>
+                <el-button size="mini" type="primary" @click="runUnicornCmd">Run</el-button>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </el-tab-pane>
+        <el-tab-pane label="Inspect UI" name = "inspector">
+          <ui-inspector :rtcpc="pc" :uri="appiumUri" :caps="appiumCaps" :result="inspectorResult" :sessionid="appiumSessionID" @screenshot="takeScreenShot" :imagedata="screenShot"></ui-inspector>
+        </el-tab-pane>
+        <el-tab-pane label="Allure Reports" name = "reports">
+          <a :href="AllureReportUrl" target="blank">Open Report Site </a>
+          <iframe :src="AllureReportUrl" :style="iframeStyle"></iframe>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+  </div>
+</div>
+</div>
+{% end %}
+
+{% block script %}
+<script src="{{static_url('javascripts/popper.min.js')}}"></script>
+<script src="{{static_url('javascripts/clipboard.min.js')}}"></script>
+<script src="{{static_url('javascripts/xterm.min.js')}}"></script>
+<script src="{{static_url('javascripts/fit.min.js')}}"></script>
+<script src="{{static_url('javascripts/ResizeSensor.min.js')}}"></script>
+<script src="{{static_url('javascripts/imagepool.js')}}"></script>
+<script src="{{static_url('javascripts/ui_inspector.js')}}"></script>
+<script src="{{static_url('javascripts/RecordRTC.js')}}"></script>
+<script src="{{static_url('javascripts/xml2json.min.js')}}"></script>
+<script src="{{static_url('vendor/vue-json-viewer/vue-json-viewer.js')}}"></script>
+<script>
+  const udid = "{{udid}}"
+  const proxy = "{{proxy}}"
+  const userEmail = "{{current_user.email}}"
+  const iceConfig = JSON.parse(`{{turnservers}}`.replaceAll("&quot;", "\""))
+  Vue.use(JsonView.default)
+
+  $.getJSON("/api/v1/user/devices/" + udid)
+    .then(ret => {
+      vm = new Vue({
+        el: "#content-wrapper",
+        data: Object.assign({
+          activeName: 'common',
+          canvas: {
+            bg: null,
+            fg: null,
+          },
+          pc: null,
+          chMiniTouch: null,
+          chCmd: null,
+          inspectorResult: "",
+          appiumSessionID: "",
+          videoElement: null,
+          screenShot: null,
+          term: null,
+          shellOutputChannel: null,
+          canvasStyle: {
+            opacity: 1,
+            width: '400px',
+            height: 'unset',
+            maxHeight: "unset",
+          },
+          rotation: 0,
+          session: {
+            id: '',
+            frameCount: 0,
+          },
+          display: {
+            width: 0,
+            height: 0,
+            fps: 0,
+            ws: null,
+          },
+          alert: {
+            buttons: [],
+            loading: false,
+            visible: false,
+          },
+          app: {
+            message: "",
+            finished: true,
+          },
+          pageHidden: false,
+          imagePool: new ImagePool(100),
+          imgsToDraw: [],
+          unicorn:{
+            activeName: "chooseFeature",
+            flowControl:{
+              chooseFeture:false,
+              chooseTag: true,
+              chooseUser: true,
+              runCase: true
+            },
+            platform:"iOS",
+            udid:"",
+            selectedTag:[],
+            tags:[],
+            selectedDir:"",
+            fileOrFolders:[],
+            enableNext() {
+              switch(this.activeName){
+                case "chooseFeature":
+                  if(this.selectedDir.endsWith(".feature")){
+                    return true
+                  }
+                  for(i=0; i< this.fileOrFolders.length;i ++) {
+                    if(this.fileOrFolders[i].endsWith(".feature")){
+                      return true
+                    } 
+                  }
+                  break
+                case "chooseTag":
+                  if(this.selectedTag.length > 0) {
+                    this.flowControl.runCase = false
+                    return true
+                  }
+                  break
+              }
+              return false
+            },
+            genCmd(){
+              // return "cmds"+this.udid+this.selectedDir+this.selectedTag.join(",")
+              //cd $UNICORN_HOME && export APPIUM_SERVER_URL=http://localhost:20006/wd/hub && python3 -m behave ./features/pax_food -D platform=Android -D udid=1a4fdcfa -t=@paxdaxmex_01,@IMorder 
+              localAppiumUrl = "http://localhost:"+this.appiumUrl.split(":")[2]
+              return "cd $UNICORN_HOME && export APPIUM_SERVER_URL="+localAppiumUrl+"&& export ReportFolder=unicorn &&  $ALLURE_PROJECTS/createfolder.sh $ReportFolder && python3 -m behave  ."+this.selectedDir+" -D platform="+this.platform+" -D udid="+this.udid+" -t="+this.selectedTag.join(",")+" -f allure_behave.formatter:AllureFormatter -o $ALLURE_PROJECTS/$ReportFolder/results"
+            },
+            previewCmd: "",
+          },
+          recording:false,
+          recordingColor(){
+            if(this.recording){
+              return "red"
+            }
+            return "gray"
+          },
+          recorder:null,
+        }, ret.device),
+        computed: {
+          landscape() {
+            return this.display.width > this.display.height;
+          },
+          displayLinked() {
+            return this.display.ws !== null
+          },
+          rtcAddress() {
+            // return this.source.webrtc
+            if(document.URL.startsWith("http://localhost")) {
+              return this.source.webrtc
+            }
+            // // return this.source.atxAgentAddress
+            return proxy+"/"+this.source.webrtc.replace(":", "/")
+          },
+          AllureReportUrl(){
+            return "http://"+proxy+"/"+this.source.webrtc.split(":")[0]+"/5050/allure-docker-service/projects/unicorn/reports/latest/index.html"
+          },
+          iframeStyle() {
+            let iframeHeight =  this.$el.clientHeight - 150
+            return {
+              width: '100%',
+              height: iframeHeight.toString()+'px',
+            }
+          },
+          wdaUrl(){
+            // return this.source.wdaUrl
+            let url = this.source.wdaUrl
+            let segs = url.split("://")
+            return segs[0] + "://" + proxy + "/" + segs[1].replace(":", "/")
+          },
+          displayWSUrl() {
+            // let url = this.source.wdaUrl.replace(/^https?:\/\//, "ws://") + "/screen"
+            let url = this.wdaUrl.replace(/^https?:\/\//, "ws://") + "/screen"
+            return url
+          },
+          appiumUri() {
+            return this.source.appiumUrl+"/wd/hub"
+          },
+          appiumCaps() {
+            return JSON.stringify({
+              'platformName': "iOS",
+              'deviceName': this.properties.name,
+              'platformVersion': this.properties.version,
+              'automationName': 'XCUITest'
+            })
+          }
+        },
+        methods: {
+          toggleRecord(){
+            if(this.recorder == null) {
+              alert("recorder not ready,retry later!")
+            }
+            let rec = this.recorder
+            if(!this.recording){
+              this.recording = true
+              rec.startRecording()
+            }else {
+              this.recording= false
+              rec.stopRecording().then(function(){
+                rec.getBlob().then(blob => invokeSaveAsDialog(blob, "record.webm"))
+              })
+            }
+          },
+          screenshot() {
+            $.ajax({
+              url: this.path2url("/screenshot"),
+              dataType: "json",
+            }).then(ret => {
+              if (window.navigator.msSaveOrOpenBlob) {
+                alert("IE is not supported !!!")
+                return
+              }
+              var a = document.createElement("a");
+              a.href = "data:image/jpeg;base64," + ret.value;
+              a.download = "screen-" + new Date().getTime() + ".jpg";
+              a.click();
+              setTimeout(function () {
+                document.body.removeChild(a);
+              }, 0);
+            })
+          },
+          appOpen(bundleId) {
+            return $.ajax({
+              method: "post",
+              url: this.path2url("/session"),
+              data: JSON.stringify({
+                capabilities: {
+                  alwaysMatch: {
+                    bundleId: bundleId,
+                    shouldWaitForQuiescence: true,
+                  }
+                }
+              })
+            }).then(ret => {
+              this.session.id = ret.sessionId
+            })
+          },
+          chooseAlertButtons() {
+            this.alert.buttons = []
+            this.alert.loading = true
+            return $.ajax({
+              method: "get",
+              url: this.path2url("/session/" + this.session.id + "/wda/alert/buttons")
+            }).then(ret => {
+              this.alert.buttons = ret.value
+              this.$nextTick(() => {
+                this.alert.visible = true
+              })
+              // this.$alert("未检测到系统弹窗")
+              // this.$alert("未知异常，打开开发者选项查看问题
+            }).always(() => {
+              this.alert.loading = false
+            })
+          },
+          alertAccept(name) {
+            let data = null;
+            if (typeof name === 'string' || name instanceof String) {
+              data = JSON.stringify({ name: name })
+            }
+            return $.ajax({
+              method: "post",
+              url: this.path2url("/session/" + this.session.id + "/alert/accept"),
+              data: data,
+            })
+          },
+          initClipboardJS() {
+            var clipboard = new ClipboardJS(".clipboard-copy")
+
+            clipboard.on('success', function (e) {
+              e.clearSelection()
+              showTooltip(e.trigger, "Copied!")
+            })
+
+            document.querySelectorAll(".clipboard-copy").forEach(e => {
+              e.addEventListener('mouseleave', clearTooltip);
+              e.addEventListener('blur', clearTooltip);
+            })
+
+            function clearTooltip(e) {
+              const target = e.currentTarget;
+              setTimeout(() => {
+                target.innerHTML = ""
+              }, 200)
+            }
+
+            function showTooltip(elem, msg) {
+              elem.innerHTML = "&nbsp;<small>" + msg + "</small>"
+            }
+          },
+          onUploadSelect(file) {
+            this.app.url = file.response.data.url;
+          },
+          onUpload(resp, file, files) {
+            if (!resp.success) {
+              this.$message({
+                message: resp.description,
+                type: "error",
+              })
+              return
+            }
+            this.app.url = window.location.origin+"/uploads/" + resp.data.url;
+            return this.appInstall()
+          },
+          appInstall() {
+            // const url = this.app.url
+            if (!this.term) {
+                this.loadTerminal()
+            }
+            this.activeName='terminal';
+
+            let cmd = "curl  -s '"+this.source.url+"/app/install?udid="+this.udid+
+            "' -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' --data-raw 'url="+
+            this.app.url
+            +"'"
+
+            this.term.write(cmd+"\n\r")
+            this.runHostShell(cmd, "terminal")
+            // this.app.finished = false
+            // this.app.message = "Installing ..."
+            // $.ajax({
+            //   method: "post",
+            //   url: this.source.url + "/app/install?udid=" + this.udid,
+            //   data: {
+            //     url: url,
+            //   }
+            // }).done(ret => {
+            //   this.app.message = "Installation Succeeded"
+            // }).fail(err => {
+            //   this.app.message = "Installation failed " + err.responseJSON.description;
+            // }).always(() => {
+            //   this.app.finished = true
+            // })
+          },
+          showFPS() {
+            let frame = this.session.frameCount;
+            setInterval(() => {
+              this.display.fps = this.session.frameCount - frame
+              frame = this.session.frameCount;
+            }, 1000);
+          },
+          closePC(){
+            let app = this
+            if(app.pc) {
+              try{
+                app.close()
+              }catch{}
+            }
+          },
+          closeWindowWhenReleased(interval) {
+            this.closePC()
+            setTimeout(() => {
+              if (document.hidden) {
+                $.getJSON("/api/v1/user/devices/" + udid)
+                  .done(ret => {
+                    this.closeWindowWhenReleased(5000)
+                  })
+                  .fail(ret => {
+                    console.log(ret)
+                    if (ret.status === 403) { // forbidden
+                      window.close()
+                      return
+                    }
+                  })
+              } else {
+                $.getJSON("/api/v1/user/devices/" + udid + "/active")
+                  .done((ret) => {
+                    this.closeWindowWhenReleased(interval)
+                  })
+                  .fail(function (ret) {
+                    console.log(ret)
+                    alert("Device is released，Press F12 to debug")
+                    // let content = '设备' + this.idleTimeout + "秒内没有操作，设备自动释放，点击刷新重新占用该设备"
+                    // this.$alert(content, '设备超时提示', {
+                    //   confirmButtonText: '刷新',
+                    //   type: 'warning'
+                    // }).then(() => {
+                    //   location.reload()
+                    // }).catch(() => {
+                    //   window.close()
+                    // })
+                  })
+              }
+            }, interval)
+          },
+          pressHome() {
+            // return $.ajax({
+            //   url: this.path2url("/wda/homescreen"),
+            //   method: "POST",
+            // }).then(() => {
+            //   setTimeout(() => {
+            //     this.hotfix()
+            //   }, 500)
+            // })
+            this.runMinitouchCmd("NMT:/homescreen", "")
+          },
+          getSessionId() {
+            return $.ajax({
+              method: "post",
+              url: this.path2url("/session"),
+              data: '{"capabilities": {}}',
+            }).then(ret => {
+              return ret.sessionId;
+            })
+          },
+          hotfix() {
+            return $.ajax({
+              url: this.path2url("/status")
+            }).then(ret => {
+              if (ret.sessionId) {
+                return ret.sessionId
+              }
+              return this.getSessionId()
+            }).then((sessionId) => {
+              this.session.id = sessionId;
+              return $.ajax({
+                url: this.path2url("/session/" + this.session.id + "/window/size")
+              })
+            }).then(ret => {
+              if (ret.value.width && ret.value.height) { // width and height might be 0
+                this.display.width = ret.value.width;
+                this.display.height = ret.value.height;
+              }
+
+              // 设定帧率为30
+              $.ajax({
+                method: "post",
+                url: this.path2url("/session/" + this.session.id + "/appium/settings"),
+                data: '{"settings": {"mjpegServerFramerate": 10}}',
+              })
+            })
+          },
+          stopUsing() {
+            this.closePC()
+            $.ajax({
+              method: "delete",
+              url: "/api/v1/user/devices/" + this.udid,
+              dataType: "json"
+            }).always(() => {
+              window.close()
+            })
+          },
+          handleTabClick(tab, event) {
+            console.log(tab.name)
+            if (tab.name == "terminal") {
+              if (!this.term) {
+                this.loadTerminal()
+              }
+            }
+            if (tab.name == "unicorn") {
+              this.unicorn.udid = this.udid
+              this.unicorn.appiumUrl=this.appiumUri
+              this.getUnicornFile()
+            }
+          },
+          handleUnicornSteps(tab, event){
+            console.log(tab.name)
+            switch(tab.name) {
+              case "chooseFeature":
+                this.getUnicornFile(this.unicorn.selectedDir)
+                break
+              case "chooseTag":
+                this.loadUnicornTags(this.unicorn.selectedDir)
+                break
+              case "runCase":
+                this.loadUnicornCmd()
+                break
+            }
+            return
+          },
+          loadUnicornTags(dirOrFile) {
+            if(dirOrFile.endsWith(".feature")) {
+              // a file, scan the file
+              this.runHostShell('cat $UNICORN_HOME' + this.unicorn.selectedDir + ' | grep @ | grep -v \"When\\|Then\\|And\\|#\\|Scenario\"', "unicorn_tags")
+            } else {
+              // a folder, scan all .feature files in this folder
+              this.runHostShell('cat $UNICORN_HOME' + this.unicorn.selectedDir + '/*.feature  | grep @ | grep -v \"When\\|Then\\|And\\|#\\|Scenario\"', "unicorn_tags")
+            }
+          },
+          updateSelectedTags(tags){
+              this.unicorn.selectedTag=tags
+              if(tags > 0) {
+                this.unicorn.flowControl.chooseUser = false
+              }
+          },
+          loadUnicornCmd(){
+            this.unicorn.previewCmd = this.unicorn.genCmd()
+          },
+          runUnicornCmd(){
+            if (!this.term) {
+                this.loadTerminal()
+            }
+            this.activeName='terminal';
+            let cmd = this.unicorn.previewCmd
+            this.term.write(cmd+"\n\r")
+            this.runHostShell(cmd, "terminal")
+          },
+          getUnicornFile(dir) {
+            if (!dir || dir == "/features") {
+              this.unicorn.selectedDir = "/features";
+            } else if (dir == "..") {
+              if (this.unicorn.selectedDir.indexOf("/") == this.unicorn.selectedDir.lastIndexOf("/")){
+                this.unicorn.selectedDir = "/features";
+              } else {
+                this.unicorn.selectedDir = this.unicorn.selectedDir.substr(0, this.unicorn.selectedDir.lastIndexOf("/"));
+              }
+            } else if (dir == this.unicorn.selectedDir) {
+              this.unicorn.selectedDir = dir;
+            } else {
+              this.unicorn.selectedDir = this.unicorn.selectedDir + "/" + dir;
+            }
+            this.runHostShell('ls \"$UNICORN_HOME' + this.unicorn.selectedDir + '\"', "unicorn")
+          },
+          path2url(pathname) {
+            // return this.source.wdaUrl + pathname
+            return this.wdaUrl + pathname
+          },
+          disableTouch() {
+            let element = this.canvas.bg;
+            element.style.cursor = 'not-allowed' // set el.style is not working
+            element.style.pointerEvents = "none"
+          },
+          enableTouch() {
+            let element = this.canvas.bg;
+            element.style.cursor = ''
+            element.style.pointerEvents = ""
+          },
+          runMinitouchCmd(action, data){
+            let vueApp = this
+            if(!vueApp || vueApp.chMiniTouch || vueApp.chMiniTouch.readyState != "open") {
+              console.log("minitouch channel not open")
+            }
+            let cmd = JSON.stringify({
+              "op":  action,
+              "data": data
+            })
+            console.log("sending minitouch cmd", cmd)
+            vueApp.chMiniTouch.send(cmd)
+          },
+          syncTouchpad() {
+            let vueApp  = this
+            let bounds = {}
+            let element = this.videoElement;
+            if(!element || element.readyState != 4)  {
+              return
+            }
+            function calculateBounds() {
+              var el = element;
+              bounds.w = el.offsetWidth
+              bounds.h = el.offsetHeight
+              bounds.x = 0
+              bounds.y = 0
+
+              while (el.offsetParent) {
+                bounds.x += el.offsetLeft
+                bounds.y += el.offsetTop
+                el = el.offsetParent
+              }
+            }
+
+            let coords = (e) => {
+              let x = e.pageX - bounds.x
+              let y = e.pageY - bounds.y
+              x = Math.max(0, Math.min(bounds.w, x))
+              y = Math.max(0, Math.min(bounds.h, y))
+
+              return {
+                fingerX: x + element.offsetLeft,
+                fingerY: y + element.offsetTop,
+                x: Math.floor(x / bounds.w * this.display.width),
+                y: Math.floor(y / bounds.h * this.display.height)
+              }
+            }
+
+
+            let mousePos = {
+              beganAt: null,
+              down: null,
+              up: null,
+            }
+
+            let wdaTouch = (x, y) => {
+              // return $.ajax({
+              //   method: "POST",
+              //   url: this.path2url("/session/" + this.session.id + "/wda/tap/0"),
+              //   data: JSON.stringify({ x, y })
+              // })
+              vueApp.runMinitouchCmd("NMT:/tap", {x, y})
+            }
+
+            let wdaSwipe = (fromX, fromY, toX, toY, duration) => {
+              // return $.ajax({ // 经过测试，相同移动轨迹，wda/touch/perform 比 wda/dragfromtoforduration 响应速度快不少，整体操作iPhoneX上从1.3s+缩短到0.5s内
+              //   url: this.path2url("/session/" + this.session.id + "/wda/touch/perform"),
+              //   method: "POST",
+              //   data: JSON.stringify({
+              //     actions: [
+              //       {action: "press", options: {x: fromX, y: fromY}},
+              //       {action: "wait", options: {ms: duration > 17 ? duration : 100 }},// 必须大于17ms，否则 wda 会没反应。日常使用一般100毫秒比较正常
+              //       {action: "moveTo", options: {x: toX, y: toY}},
+              //       {action:"release", options: {}}
+              //     ]
+              //   })
+              // })
+              vueApp.runMinitouchCmd("NMT:/perform", {
+                  actions: [
+                    {action: "press", options: {x: fromX, y: fromY}},
+                    {action: "wait", options: {ms: duration > 17 ? duration : 100 }},// 必须大于17ms，否则 wda 会没反应。日常使用一般100毫秒比较正常
+                    {action: "moveTo", options: {x: toX, y: toY}},
+                    {action:"release", options: {}}
+                  ]
+                })
+            }
+
+            let mouseUpOperate = (x, y) => {
+              let duration = new Date() - mousePos.beganAt; // milliseconds
+              console.log("hold duration", duration);
+
+              const
+                startX = mousePos.down.x,
+                startY = mousePos.down.y,
+                moveX = Math.abs(startX - x),
+                moveY = Math.abs(startY - y);
+
+              if (moveX == 0 && moveY == 0) {
+                if (duration < 200) { // click
+                  // click
+                  console.log("touch", x, y)
+                  return wdaTouch(x, y)
+                } else {
+                  // long click
+                  console.log("touchHold", x, y)
+                  return wdaSwipe(startX, startY, x, y, duration)
+                }
+              } else {
+                console.log("swipe:", mousePos.down, "to", { x, y }, duration)
+                return wdaSwipe(startX, startY, x, y, 100)
+              }
+            }
+
+            const mouseDownListener = (event) => {
+              let e = event;
+              if (e.originalEvent) {
+                e = e.originalEvent
+              }
+              e.preventDefault()
+
+              // Middle click equals HOME
+              if (e.which === 2) {
+                this.pressHome()
+                return
+              }
+
+              fakePinch = e.altKey
+              calculateBounds()
+
+              let { fingerX, fingerY, x, y } = coords(e)
+
+              activeFinger(0, fingerX, fingerY);
+              mousePos.beganAt = new Date()
+              mousePos.down = { x, y }
+
+              document.addEventListener('mousemove', mouseMoveListener);
+              document.addEventListener('mouseup', mouseUpListener);
+            }
+
+            function mouseMoveListener(event) {
+              var e = event
+              if (e.originalEvent) {
+                e = e.originalEvent
+              }
+              e.preventDefault()
+
+              let { fingerX, fingerY } = coords(e)
+              var pressure = 0.5
+              activeFinger(1, fingerX, fingerY, pressure);
+            }
+
+            function mouseUpListener(event) {
+              var e = event
+              if (e.originalEvent) {
+                e = e.originalEvent
+              }
+              e.preventDefault()
+
+              element.style.cursor = "not-allowed" // not working
+              element.style.pointerEvents = "none"
+
+              let { fingerX, fingerY, x, y } = coords(e)
+
+              activeFinger(1, fingerX, fingerY);
+
+              stopMousing()
+              element.removeEventListener("mousedown", mouseDownListener)
+
+              mouseUpOperate(x, y)
+              recoverFingersAndMouse()
+            }
+
+            function stopMousing() {
+              document.removeEventListener('mousemove', mouseMoveListener);
+              document.removeEventListener('mouseup', mouseUpListener);
+            }
+
+            function activeFinger(index, x, y, pressure) {
+              var scale = 0.5 + (pressure || 0.5)
+              $(".finger-" + index)
+                .addClass("active")
+                .css("transform", 'translate3d(' + x + 'px,' + y + 'px,0)')
+            }
+
+            function deactiveFinger(index) {
+              $(".finger-" + index).removeClass("active")
+            }
+
+            function recoverFingersAndMouse() {
+              deactiveFinger(0)
+              deactiveFinger(1)
+              element.style.cursor = ""
+              element.style.pointerEvents = ""
+              element.addEventListener('mousedown', mouseDownListener);
+            }
+
+            function preventHandler(event) {
+              event.preventDefault()
+            }
+
+            /* bind listeners */
+            element.addEventListener('mousedown', mouseDownListener);
+          },
+          fitCanvas(canvas) {
+            if (canvas.width > canvas.height) {
+              // 横屏显示，宽高相等
+              this.canvasStyle.maxHeight = canvas.parentElement.clientHeight + "px";
+              this.canvasStyle.height = "auto"
+              this.canvasStyle.width = canvas.parentElement.clientHeight + "px"
+            } else {
+              this.canvasStyle.maxHeight = "unset"
+              this.canvasStyle.height = canvas.parentElement.clientHeight + "px"
+              this.canvasStyle.width = "auto"
+            }
+          },
+          initRTC(){
+            let pc = new RTCPeerConnection(iceConfig)
+            this.pc = pc
+            let vueApp = this
+            pc.ontrack = function (event) {
+              var el = document.createElement(event.track.kind)
+              el.srcObject = event.streams[0]
+              vueApp.recorder = new RecordRTCPromisesHandler(event.streams[0], {type:'video'})
+              vueApp.videoElement = el
+              // el = vueApp.AddRemoteControl(el)
+              el.autoplay = true
+              el.controls = false
+              el.style.height = "100%"
+              el.style.maxHeight = vueApp.canvas.bg.maxHeight
+              el.style.maxWidth = vueApp.canvas.bg.maxWidth
+              el.addEventListener("pause", e => {
+                el.play()
+              })
+              el.addEventListener("contextmenu", e => false)
+              el.addEventListener("loadeddata", e => {
+                vueApp.syncTouchpad()
+              })
+              el.addEventListener("resize", e => {
+                if(!vueApp.videoElement){
+                  console.log("videoElement not exists")
+                  return
+                }
+                videoElement = vueApp.videoElement
+                if(vueApp.canvas.bg.width < videoElement.width) {
+                  videoElement.style.height = "auto"
+                  videoElement.style.maxWidth = vueApp.canvas.bg.style.maxWidth
+                  videoElement.style.maxHeight = vueApp.canvas.bg.style.maxHeight
+                  videoElement.style.width = vueApp.canvas.bg.style.width
+                } else if (vueApp.canvas.bg.height < videoElement.height){
+                  videoElement.style.height = vueApp.canvas.bg.height
+                  videoElement.style.maxWidth = vueApp.canvas.bg.style.maxWidth
+                  videoElement.style.maxHeight = vueApp.canvas.bg.style.maxHeight
+                  videoElement.style.width = "auto"
+                }else {
+                  videoElement.style.height = "auto"
+                  videoElement.style.width = "auto"
+                  videoElement.style.maxWidth = vueApp.canvas.bg.style.maxWidth
+                  videoElement.style.maxHeight = vueApp.canvas.bg.style.maxHeight
+                }
+              })
+              vueApp.canvas.bg.appendChild(el)
+            }
+            pc.addTransceiver('video', {'direction':"recvonly"})
+            channel = pc.createDataChannel("minitouch")
+            channel.onopen  = function(e){
+                console.log("minitouch channel open", e)
+                console.log("minitouch connected")
+                channel.send(JSON.stringify({ // touch reset, fix when device is outof control
+                      operation: "r",
+                }))
+            }
+            channel.onclose = function(e){
+                console.log("minitouch closed")
+            }
+            channel.onmessage = function(e){
+              if(this.videoElement && this.videoElement.pasusd) {
+                try{
+                  vueApp.videoElement.play()
+                }catch{}
+              }
+              console.log("minitouch msg", e.data)
+              try {
+                json = JSON.parse(e.data)
+                if (json) {
+                  console.log("resized:", json)
+                  vueApp.rotation = json.rotation
+                } 
+              }catch(e)  {
+                console.log("resized exception:", 0)
+                vueApp.rotation = 0
+              }
+            }
+            this.chMiniTouch = channel
+            let dec = new TextDecoder("ascii")
+            let cmdChannel = pc.createDataChannel('CMD')
+            cmdChannel.onclose = () => console.log('cmdChannel has closed')
+            cmdChannel.onopen = () => {
+              console.log('cmdChannel has opened')
+              //TODO init term
+            }
+            cmdChannel.onmessage = e => {
+              let msg = e.data
+              if (typeof(msg) !== "string"){
+                console.log('decoding')
+                msg = dec.decode(msg)
+                // msg = msg.split('\n').join("<br>")
+                vueApp.processShellOutput(msg)
+              }
+              console.log(`Message from DataChannel '${cmdChannel.label}' payload <br>'${msg}'`)
+            }
+            this.chCmd = cmdChannel
+            pc.oniceconnectionstatechange = e => {
+              console.log("oniceconnectionstatechange")
+              console.log(pc.iceConnectionState)
+              if(pc.iceConnectionState === "disconnected") {
+                let content = 'Network connection closed, click refresh to take control again'
+                vueApp.$alert(content, 'Device Timeout', {
+                  confirmButtonText: 'Refresh',
+                  type: 'warning'
+                }).then(() => {
+                  location.reload()
+                }).catch(() => {
+                  window.close()
+                })
+              }
+            }
+            url =  "ws://" + this.rtcAddress + "/signal"
+            console.log("rtc connect to "+url)
+            conn = new WebSocket(url);
+            conn.onclose = function (evt) {
+              console.log("rtc ws  conn.onclose")
+            };
+            conn.onmessage = function (evt) {
+              console.log("conn.onmessage")
+              var answer = JSON.parse(evt.data)
+              console.log(JSON.stringify(answer))
+              remoteSDP = new RTCSessionDescription(answer)      
+              pc.setRemoteDescription(remoteSDP).catch(console.log)
+            };
+            conn.onopen = function(evt){
+              console.log("connectionopen")
+              try {
+                pc.createOffer().then(d => {
+                  pc.setLocalDescription(d)
+                  console.log("offer:"+JSON.stringify(d))
+                  conn.send(JSON.stringify(d))
+                })
+              } catch (e) {
+                alert(e)
+              }
+            }
+          },
+          runHostShell(command, backChannel) {
+            if(backChannel == undefined || backChannel == "") {
+              backChannel = "**channel**hostshell**"
+            }
+            if(this.chCmd != null && this.chCmd.readyState == "open") {
+              this.chCmd.send("echo **channel**"+backChannel+"** &&"+command)
+              console.log("runHostShell", command)
+              return
+            }
+            console.log("runHostShell:", " cmdChannel is not ready")
+          },
+          processShellOutput(msg)  {
+            if(!msg){
+              return
+            }
+            vueApp = this
+            let outputChannel = vueApp.shellOutputChannel
+            if(msg.indexOf("**channel**")>-1) {
+              msgpart = msg.replace("\n", "").replace("**channel**", "").split("**")
+              vueApp.shellOutputChannel = msgpart[0]
+              outputChannel = msgpart[0]
+              console.log("Set Output Channel to '"+outputChannel+"'")
+              switch(outputChannel){
+                case "unicorn":
+                  vueApp.unicorn.fileOrFolders = []
+                  break
+                case "unicorn_tags":
+                  vueApp.unicorn.tags = []
+                  break
+              }
+              if(msgpart.length == 2 && msgpart[1]  ==  "") {
+                return
+              }
+              msg = msgpart[1]
+            }
+            console.log("output for channel "+outputChannel + "\n" + msg)
+            switch(outputChannel) {
+              case "terminal":
+                outputs = msg.split("\n")
+                for(let i = 0; i < outputs.length;i ++){
+                  if(outputs[i].trim().length < 1) {
+                    continue
+                  }
+                  vueApp.term.write(outputs[i]+"\n\r")
+                }
+                break
+              case "unicorn":
+                let unicornFiles = msg.trim("\n").split("\n")
+                for(let i = 0; i < unicornFiles.length; i ++){
+                  vueApp.unicorn.fileOrFolders.push(unicornFiles[i])
+                }
+                break
+              case "unicorn_tags":
+                let tags = msg.replaceAll("\n", " ").replaceAll(" ", "").split("@")
+                let newTags = vueApp.unicorn.tags
+                for(i=0; i< tags.length; i ++){
+                  let tag =  tags[i]
+                  if(tag != "") {
+                    let tagWithAt = "@"+tag
+                    if(newTags.indexOf(tagWithAt) < 0) {
+                      newTags.push(tagWithAt)
+                    }
+                  }
+                }
+                vueApp.unicorn.tags = newTags
+                break
+              default:
+                console.log(msg)
+                break
+            }
+          },
+          takeScreenShot(){
+            let videoElement = this.videoElement
+            let canvas = document.createElement("canvas");
+            canvas.width=videoElement.clientWidth
+            canvas.height=videoElement.clientHeight
+            let ctx = canvas.getContext('2d')
+            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+            let dataURI=canvas.toDataURL()
+            this.screenShot = dataURI
+          },
+          loadTerminal() {
+            let vueApp = this
+            let term = new Terminal({
+                screenKeys: true,
+                useStyle: true,
+                cursorBlink: true
+              })
+            let cmd = ""
+            term.on('data', data => {
+              // console.log(data.charCodeAt(0))
+              term.write(data)
+              if(data && data.length > 0 && data.charCodeAt(0) == 127) {
+                term.write("\r")
+                for(let i = 0; i < cmd.length; i ++) {
+                  term.write(' ')
+                }
+                term.write("\r")
+                cmd = cmd.slice(0, cmd.length-1)
+                term.write(cmd)
+                return
+              }
+              cmd = cmd + data
+              if(cmd.length > 1 && cmd[cmd.length-1] == '\n' || cmd[cmd.length-1] == '\r'){
+                vueApp.runHostShell(cmd.replace("\r", "").replace("\n", ""), "terminal")
+                cmd = ""
+                term.write("\n\r")
+              }
+            })
+
+            term.open(this.$refs.xterm, { focus: true });
+            term.fit()
+            vueApp.term = term
+            new ResizeSensor(this.$refs.xterm, function (e) {
+              console.log("Resize", e)
+              term.resize()
+              term.fit()
+            })
+          },
+        },
+        mounted: function () {
+          this.canvas.bg = this.$refs.bgCanvas;
+          this.initRTC()
+
+          this.hotfix()
+
+          // show fps
+          this.showFPS()
+
+          // 防止设备被自动释放
+          this.closeWindowWhenReleased(10000)
+
+          // 更新使用时间
+          setInterval(() => {
+            let duration = moment.now() - moment(this.usingBeganAt)
+            this.$refs.usingTime.innerHTML = moment.utc(duration).format("HH:mm:ss")
+          }, 1000)
+
+          // 初始化剪贴板
+          this.initClipboardJS()
+        },
+        components:{
+          "term-snippet": {
+            props: {
+              command: String,
+              term: Object,
+            },
+            methods: {
+              run() {
+                this.term.emit("data", "tidevice "+this.command + "\n");
+                this.term.focus()
+              }
+            },
+            template: '<code style="cursor: pointer" @click="run" v-text="command"></code>'
+          }
+        }
+      })
+    })
+</script>
+{% end %}

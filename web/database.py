@@ -28,6 +28,13 @@ class DB(object):
         "groups": {
             "name": "groups",
         },
+        "packages":{
+            "name":"packages",
+            "primary_key":"md5sum_packageName"
+        },
+        "auditlog":{
+            "name":"auditlog"
+        }
     }
 
     def __init__(self, db='demo', **kwargs):

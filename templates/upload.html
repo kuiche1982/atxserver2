@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}设备列表{% end %}
+{% block title %}Package List{% end %}
 
 {% block script %}
 {% end %}
@@ -19,19 +19,20 @@
 
 {% block content %}
 <div class="container">
-    <h3>文件上传</h3>
+    <h3>Upload File</h3>
     <el-upload ref="upload" class="upload-demo" drag action="/uploads" :on-success="onUpload" multiple>
         <i class="el-icon-upload"></i>
-        <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
-        <div class="el-upload__tip" slot="tip">暂时只支持apk的上传</div>
+        <div class="el-upload__text">Drag here to upload or <em>Choose file</em></div>
     </el-upload>
 
     <div>
         <template v-for="f in files">
             <el-card class="box-card">
-                <img :src="f.iconUrl" alt="icon" style="height: 30px;">
+                <img :src="f.iconPath" v-if="f.iconUrl!=undefined&&f.iconUrl!=''" alt="icon" style="height: 30px;">
+                <img src="/static/images/android-logo-robot.png" v-if="!f.iconPath||f.iconPath==''" alt="icon" style="height: 30px;">
                 {{!f.packageName}}
                 <em>{{!f.versionName}}</em>
+                <em><a :href="'/uploads/'+f.url">download {{!f.url}}</a></em>
             </el-card>
         </template>
     </div>
@@ -40,35 +41,39 @@
 
 {% block script %}
 <script>
-    new Vue({
-        el: "#app",
-        data: {
-            title: "hello world",
-            files: [{
-                iconUrl: "/static/images/android-logo-robot.png",
-                packageName: "TODO",
-                versionName: "1.1.2"
-            }],
-        },
-        methods: {
-            onUpload(resp, file, files) {
-                if (!resp.success) {
-                    this.$message({
-                        message: resp.description,
-                        type: "error",
-                    })
-                    return
+    $.getJSON("/api/v1/packages")
+    .then(ret => {
+        vm = new Vue({
+            el: "#app",
+            data: {
+                title: "hello world",
+                files: ret.data,
+            },
+            computed:{
+                url(){
+                    return navigator.url
+                },
+            },
+            methods: {
+                onUpload(resp, file, files) {
+                    if (!resp.success) {
+                        this.$message({
+                            message: resp.description,
+                            type: "error",
+                        })
+                        return
+                    }
+                    if (!resp.data.iconPath) {
+                        resp.data.iconPath = "/static/images/android-logo-robot.png"
+                    }
+                    this.files.push(resp.data)
+                    console.log(resp)
+                    console.log(file)
+                    console.log(files)
+                    this.$refs.upload.clearFiles()
                 }
-                if (!resp.data.iconUrl) {
-                    resp.data.iconUrl = "/static/images/android-logo-robot.png"
-                }
-                this.files.push(resp.data)
-                console.log(resp)
-                console.log(file)
-                console.log(files)
-                this.$refs.upload.clearFiles()
             }
-        }
+        })
     })
 </script>
 {% end %}

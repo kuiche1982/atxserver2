@@ -1,0 +1,56 @@
+version: '3'
+services:
+  mobilelab:
+    # build: .
+    image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/server:latest
+    ports:
+    - "4000:4000"
+    environment:
+      RDB_HOST: rethinkdb
+    links:
+    - rethinkdb
+    depends_on:
+    - rethinkdb
+    volumes:
+      - /tmp/build:/app/uploads
+    # restart: on-failure
+  rethinkdb:
+    image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/rethinkdb:latest
+    command: rethinkdb --bind all --canonical-address 10.10.56.238
+    ports:
+    - "4002:8080"
+    - "29015:29015"
+    - "28015:28015"
+    volumes:
+      - ./rethinkdb_data:/data
+  proxy:
+    image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/atxproxy:latest
+    # image: atxproxy
+    ports:
+    - "4001:80"
+  #   volumes:
+  #   - ./nginx:/etc/nginx
+  #   environment:
+  #     FWD_HOST: web
+  #   links:
+  #   - web
+  #   depends_on:
+  #   - web
+  # web:
+  #   # image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/atxproxy
+  #   image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/webrtc
+  #   volumes:
+  #   - /Users/kui.chen/uiaiphoen/STF/webrtc-web/echourl:/app
+  seleniumgrid:
+    image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/seleniumhub:3.141.59-20210128
+    ports:
+    - "9002:4442"
+    - "9003:4443"
+    - "9004:4444"
+  turnserver:
+    image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/turn:latest
+    ports:
+    - "3478:3478/udp"
+    - "51000-52000:51000-52000/udp"
+    environment:
+      PUBLIC_IP: 10.10.56.238

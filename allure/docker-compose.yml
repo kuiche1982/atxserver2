@@ -1,0 +1,19 @@
+version: '3'
+services:
+  allure:
+    image: "gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/allure:latest"
+    environment:
+      CHECK_RESULTS_EVERY_SECONDS: None
+      KEEP_HISTORY: 1
+      KEEP_HISTORY_LATEST: 14
+    ports:
+      - "5050:5050"
+    volumes:
+      - ${PWD}/projects:/app/projects
+  allure-ui:
+    image: "gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/allure-ui:latest"
+    environment:
+      ALLURE_DOCKER_PUBLIC_API_URL: "http://${IP}:5050"
+      ALLURE_DOCKER_PUBLIC_API_URL_PREFIX: ""
+    ports:
+      - "5252:5252"

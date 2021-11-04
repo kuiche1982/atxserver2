@@ -1,0 +1,1675 @@
+{% extends "base.html" %}
+
+{% block title %}Remote Control{% end %}
+
+
+{% block style %}
+<link rel="stylesheet" href="{{static_url('css/xterm.min.css')}}">
+<link rel="stylesheet" href="{{static_url('css/fullscreen.min.css')}}">
+<link rel="stylesheet" href="{{static_url('vendor/vue-json-viewer/style.css')}}">
+<style>
+  html,
+  body,
+  #content-wrapper {
+    height: 100%;
+    /* overflow: hidden; */
+  }
+
+  #content-wrapper {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  #app {
+    display: flex;
+    flex: 1;
+    min-height: 0%;
+  }
+
+  .flex-reset {
+    min-height: 0%;
+  }
+
+  .height100 {
+    height: 100%;
+  }
+
+  .height-auto-fill {
+    height: -webkit-fill-available;
+  }
+
+  .grow-0 {
+    flex-grow: 0;
+  }
+
+  .grow-1 {
+    flex-grow: 1;
+  }
+
+  .nopadding {
+    padding: 0px;
+  }
+
+  .color-red {
+    color: red;
+  }
+
+  .color-blue {
+    color: blue;
+  }
+
+  .cursor-pointer {
+    cursor: pointer;
+  }
+
+  .debugarea {
+    /* background-color: #ddd; */
+    border: 1px solid red;
+  }
+
+  .screen {
+    position: relative;
+    background-color: gray;
+  }
+
+  .canvas-fg {
+    z-index: 20;
+    position: absolute;
+  }
+
+  .canvas-bg {
+    z-index: 10;
+  }
+
+  .xterm-wrapper {
+    line-height: 1.2;
+    font-size: 12px;
+    font-family: 'Courier New', Courier, monospace;
+    height: 30em;
+  }
+
+  .terminal {
+    border: 5px solid black;
+  }
+
+  .bottom-gutter {
+    margin-bottom: 10px;
+  }
+
+  .card-columns {
+    column-count: 2;
+  }
+</style>
+{% end %}
+
+{% block nav %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark" style="height: 55px;">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">
+      <span class="title">ATXServer2</span></a>
+    </a>
+    <div class="collapse navbar-collapse" id="navbarNavDropdown">
+      <div class="navbar-nav">
+        <a class="nav-item nav-link active" href="/">
+          <i class="fas fa-list-alt"></i> Device Control</a>
+        <!-- <a class="nav-item nav-link active" href='/'> -->
+        <!-- </a> -->
+      </div>
+      <div class="navbar-nav navbar-right ml-auto">
+        <!-- <div class="nav-item">
+          <a  href = "/devices/{{udid}}/remotecontrolproxy">use proxy</a>
+        </div> -->
+        <div class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownMenuLink" data-toggle="dropdown"
+            aria-haspopup="true" aria-expanded="false">
+            {{current_user.email}}
+          </a>
+          <div class="dropdown-menu" aria-labelledby="navbarDropdownMenuLink">
+            <a class="dropdown-item" href="/user">Profile</a>
+            <a class="dropdown-item" href="/logout">Logout</a>
+          </div>
+        </div>
+        <form class="form-inline">
+          <button class="btn btn-warning" type="button" @click="stopUsing">Release</button>
+          <span ref="usingTime" class="navbar-text" style="margin-left: 1em">
+            Utilization
+          </span>
+        </form>
+      </div>
+    </div>
+
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavDropdown"
+      aria-controls="navbarNavDropdown" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+  </div>
+</nav>
+{% end %}
+
+{% block content %}
+<div class="container-fluid d-flex flex-column">
+  <div class="row grow-1 flex-reset">
+    <div class="col-sm d-flex flex-column justify-content-center nopadding grow-0"
+      style="height: -webkit-fill-available">
+      <!-- screen header -->
+      <section class="debugarea" style="height: 32px; line-height: 32px; justify-self: start">
+        {{!properties.serial}}<i class="fas fa-tools float-right cursor-pointer" @click="videoElement&&videoElement.play()"> Fix</i>
+      </section>
+      <!-- screen body -->
+      <section ref="bgCanvas" class="screen debugarea d-flex grow-1 align-items-center justify-content-center flex-reset"
+        style="flex-basis: 0%; line-height: 0px; min-width: 300px; max-width:400px; max-height:700px;" @dblclick="runKeyevent('WAKEUP'); hotfix()">
+      </section>
+      <!-- screen footer -->
+      <section class="footer d-flex justify-content-around debugarea">
+        <button class="btn btn-default grow-1" @click="runKeyevent('APP_SWITCH')">
+          <i class="fas fa-window-restore"></i>
+        </button>
+        <button class="btn btn-default grow-1" @click="runKeyevent('MENU')">
+          <i class="fas fa-bars"></i></button>
+        <button class="btn btn-default grow-1" @click="runKeyevent('HOME')">
+          <i class="fas fa-home"></i>
+        </button>
+        <button class="btn btn-default grow-1" @click="runKeyevent('BACK')">
+          <i class="fas fa-chevron-left"></i>
+        </button>
+      </section>
+    </div>
+    <div class="col-sm height-auto-fill" style="min-height: 0; overflow-y: auto">
+      <el-tabs v-model="activeName" @tab-click="handleTabClick" style="height:100%;">
+        <el-tab-pane label="Common" name="common">
+          <div class="card-columns" ref="commonContainer">
+            
+            <div class="card">
+              <div class="card-header">
+                <i class="fas fa-keyboard"></i> Common Functions
+              </div>
+              <div class="card-body">
+                <el-button size="mini" @click="toggleRecord">
+                  <i class="fas fa-video"
+                :style="{color: recordingColor()}">Start/Stop Record Mobile Screen</i>
+                </el-button>
+                <el-button size="mini">
+                  <a :href="screenshotUrl+'?download=screenshot.jpg'" target="_blank" download>Download Screenshot</a>
+                </el-button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <i class="fas fa-keyboard"></i> Input Box
+                <span class="float-right">
+                  <el-tooltip effect="dark" content="Fix Ime" placement="top-start">
+                    <i class="fas fa-tools float-right cursor-pointer" @click="fixInputMethod"> Fix Ime Issue</i>
+                  </el-tooltip>
+                </span>
+              </div>
+              <div class="card-body">
+                <textarea ref="whatsinput" :disabled="whatsinput.disabled"
+                  :placeholder="whatsinput.disabled ? 'Input disabled' : 'Input something ...'" class="form-control"
+                  v-model="whatsinput.text" @input="sendInputText" @keydown.tab.exact.prevent="sendInputKey('tab')"
+                  @keydown.enter.exact.prevent="sendInputKey('enter')"></textarea>
+                <span style="text-align: right; font-size: 0.74em; color: gray; margin-bottom: 0px">
+                  <code>Shift+Enter</code> to start a new line, <code>Enter</code> to
+                  send</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <i class="far fa-address-card"></i> URIs
+              </div>
+              <div class="card-body">
+                <dl>
+                  <dt>ATX-AGENT URI</dt>
+                  <dd><code v-text="address"></code>
+                    <i :data-clipboard-text="address" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                  <dt>ADB Remote URI</dt>
+                  <dd><code v-text="remoteConnectAddr"></code>
+                    <i :data-clipboard-text="remoteConnectAddr" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                  <dt>Appium Remote URI</dt>
+                  <dd><code v-text="appiumUri"></code>
+                    <i :data-clipboard-text="appiumUri" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                  <dd><code v-text="appiumCaps"></code>
+                    <i :data-clipboard-text="appiumCaps" class="far fa-copy clipboard-copy cursor-pointer"></i>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+            <!-- browser -->
+            <div class="card">
+              <div class="card-header">
+                <i class="fa fa-globe"></i>
+                Open URL in Browser
+              </div>
+              <div class="card-body">
+                <textarea class="form-control" placeholder="input URL here" rows=2 v-model="browserUrl"
+                  @keyup.enter="openBrowser(browserUrl)"></textarea>
+                <div style="padding-top: 5px">
+                  <button type="button" class="btn btn-primary btn-sm float-right"
+                    @click='openBrowser(browserUrl)'>Open</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <i class="fas fa-blind"></i>
+                ShortCuts
+              </div>
+              <div class="card-body">
+                <button class="btn btn-sm btn-sm btn-outline-primary"
+                  @click="runShell('am start -a android.settings.SETTINGS')">
+                  <i class="fas fa-cog"></i>
+                  Settings
+                </button>
+                <button class="btn btn-sm btn-outline-primary"
+                  @click="runShell('am start -a com.android.settings.APPLICATION_DEVELOPMENT_SETTINGS')">
+                  <i class="fas fa-wrench"></i>
+                  Developer
+                </button>
+                <button class="btn btn-sm btn-outline-primary"
+                  @click="runShell('am start -a android.settings.WIRELESS_SETTINGS')">
+                  <i class="fas fa-wifi"></i>
+                  WIFI
+                </button>
+                <hr>
+                <span v-for="v in userSettings.shortcuts" style="margin-right: 5px">
+                  <el-button round size="small" :title="v.command" @click.exact="triggerShortcut(v)"
+                    @click.alt.exact="removeShortcut(v)">{{!v.name}}</el-button>
+                </span>
+                <el-popover placement="right" width="400" trigger="click" v-model="userSettings.visible">
+                  <div>
+                    <h4>Add New Shortcut</h4>
+                    <div class="form-group">
+                      <label>Name</label>
+                      <input class="form-control" v-model="userSettings.inputName" type="text">
+                    </div>
+                    <div class="form-group">
+                      <label>SHELL cmd</label>
+                      <input class="form-control" v-model="userSettings.inputCommand" type="text">
+                    </div>
+                    <el-button size="small" @click="addShortcut(userSettings.inputName, userSettings.inputCommand)">
+                      Add
+                    </el-button>
+                  </div>
+                  <el-button title="Alt+Left Button to Delete" size="small" round slot="reference"><i class="fas fa-plus"></i>
+                  </el-button>
+                </el-popover>
+                <!-- <div style="color: gray; font-size: 0.6em; text-align: right">Alt+左键 删除</div> -->
+                <!-- more https://stackoverflow.com/questions/38051706/i-am-trying-to-launch-settings-through-adb-using-the-adb-monkey-command-but-it-->
+              </div>
+            </div>
+
+
+            <div class="card">
+              <div class="card-header">
+                <i class="fab fa-app-store-ios"></i>
+                Current App
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <input v-model="topApp.packageName" class="form-control form-control-sm" placeholder="PackageName">
+                </div>
+                <div class="form-group">
+                  <input v-model="topApp.activity" class="form-control form-control-sm" placeholder="Activity">
+                </div>
+                <div class="btn-group">
+                  <button type="button" class="btn btn-sm btn-outline-primary" @click="refreshTopApp"><i
+                      class="fas fa-sync"></i>
+                    Refresh</button>
+                  <button type="button" :disabled="!topApp.packageName" class="btn btn-sm btn-outline-primary"
+                    @click='runShell("am force-stop "+topApp.packageName)'><i class="fas fa-stop-circle"></i>
+                    Kill</button>
+                  <button type="button" :disabled="!topApp.packageName" class="btn btn-sm btn-outline-primary"
+                    @click="addTopAppToShortcut"><i class="fas fa-blind"></i> Add to Shortcuts</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="Terminal" name="terminal">
+          <p><b style="color:red;">Don't run cmd that never end e.g. 'ping localhost', if you do that, and want to terminate the cmd, click the  <button class="btn btn-warning" type="button" @click="stopUsing">Release</button> button</b></p>
+          <div ref="xterm" class="xterm-wrapper mb-5"></div>
+          <div>
+            <strong>Frequently Used Cmds</strong>
+            <ul>
+              <li>ifconfig
+                <term-snippet :term="term" command="ifconfig | grep Mask" />
+              </li>
+              <li>active app
+                <term-snippet :term="term" command="dumpsys activity | grep mFocusedActivity" />
+              </li>
+              <li>list 3rd party apps
+                <term-snippet :term="term" command="pm list packages -3" />
+              </li>
+              <li>resolution
+                <term-snippet :term="term" command="wm size" />
+              </li>
+              <li>More cmds refer to  <a href="https://github.com/mzlogin/awesome-adb" target="_blank">awesome-adb</a>
+              </li>
+            </ul>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="Package management" name="installmanager">
+          <el-upload ref="upload" class="upload-demo" drag action="/uploads" :on-success="onUpload" multiple>
+            <i class="el-icon-upload"></i>
+            <div class="el-upload__text">Drag here to upload or <em>Choose file</em></div>
+            <div class="el-upload__tip" slot="tip">support upload apk files only</div>
+          </el-upload>
+          <div class="form-group">
+            <label
+              @dblclick='app.installUrl = "https://github.com/appium/java-client/raw/master/src/test/java/io/appium/java_client/ApiDemos-debug.apk"'>URL</label>
+            <input type="text" class="form-control form-control-sm" placeholder="http://..." v-model="app.installUrl">
+          </div>
+          <div>
+            <el-checkbox v-model="app.launch">Run after apk setup</el-checkbox>
+          </div>
+          <button class="btn btn-outline-primary btn-sm" @click="appInstall"
+            :disabled="!app.finished || !app.installUrl">Install App</button>
+          <p>
+            <pre v-show="!!app.message" v-text="app.message"></pre>
+            <small><code v-text="app.packageName"></code></small>
+          </p>
+        </el-tab-pane>
+        <el-tab-pane label="File Manager" name="filemanager">
+          <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+            <el-button size="mini" type="primary" @click="getPhoneFile('/sdcard')">Return sdcard</el-button>
+            <el-button size="mini" type="primary" @click="getPhoneFile('..')">Up</el-button>
+            <el-input size="mini" v-model="phoneDir" placeholder="Target Directory" :disabled="true">
+              <template slot="prepend">Current Directory</template>
+            </el-input>
+            <el-table size="mini" :data="phoneFiles">
+              <el-table-column label="File Name ( Doublc Click to select the folder)">
+                <template slot-scope="scope">
+                  <div width="100%" @dblclick="getPhoneFile(`${scope.row}`)">
+                    <span v-text="scope.row"></span>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="App Management" name="packagemanager">
+          <el-button icon="el-icon-refresh" size="small" @click="loadPackages">Refresh</el-button>
+          <el-table :data="packages" :default-sort="{prop: 'name'}">
+            <el-table-column sortable prop="label" label="Apps">
+              <template slot-scope="scope">
+                <img :src="`${deviceUrl}/packages/${scope.row.name}/icon`" onerror="this.onerror='';this.src='/static/images/transparent.png'"
+                  style="position: relative; top: 50%; margin: -20px; height: 40px; left: 20px;" alt="icon" />
+                <span v-text=" scope.row.label" style="padding-left: 45px"></span>
+              </template>
+            </el-table-column>
+            <el-table-column sortable prop="name" label="Pkg Name"></el-table-column>
+            <el-table-column sortable label="Version">
+              <template slot-scope="scope" v-if="scope.row.versionName">
+                <span v-text="scope.row.versionName"></span>(<span v-text="scope.row.versionCode"></span>)
+              </template>
+            </el-table-column>
+            <el-table-column label="Action">
+              <template slot-scope="scope">
+                <a class="color-red" href="javascript:void(0)" @click="removePackage(scope.row.name)">Remove</a>
+                <a href="javascript:void(0)" @click="appLaunch(scope.row.name)">Launch</a>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane label="Unicorn" name = "unicorn">
+          <el-tabs v-model="unicorn.activeName" @tab-click = "handleUnicornSteps" tab-position="left">
+            <el-tab-pane label="Choose File or Folder" name="chooseFeature" :disabled="unicorn.flowControl.chooseFeature">
+              <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+                <el-button size="mini" type="primary" @click="getUnicornFile('/features')">Return Unicorn Root Folder</el-button>
+                <el-button size="mini" type="primary" @click="getUnicornFile('..')">Up</el-button>
+                <el-input size="mini" v-model="unicorn.selectedDir" placeholder="Target Directory" :disabled="true">
+                  <template slot="prepend">Feature Files</template>
+                </el-input>
+                <el-table size="mini" :data="unicorn.fileOrFolders">
+                  <el-table-column label="File Name ( Doublc Click to select the folder)">
+                    <template slot-scope="scope">
+                      <div width="100%" @dblclick="getUnicornFile(`${scope.row}`)">
+                        <span v-text="scope.row"></span>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div><el-button size="mini" type="primary" @click="unicorn.flowControl.chooseTag=false;unicorn.activeName='chooseTag';loadUnicornTags(unicorn.selectedDir)" :disabled="!unicorn.enableNext()">Next</el-button></div>
+              </div> 
+            </el-tab-pane>
+            <el-tab-pane label="choose tag to run" name="chooseTag" :disabled="unicorn.flowControl.chooseTag">
+              <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+                <el-table size="mini" :data="unicorn.tags" @selection-change="updateSelectedTags">
+                  <el-table-column type="selection" width="55"></el-table-column>
+                  <el-table-column label="tags" prop="value" sortable>
+                    <template slot-scope="scope">
+                      <span v-text="scope.row"></span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div><el-button size="mini" type="primary" @click="unicorn.activeName='runCase';loadUnicornCmd()" :disabled="!unicorn.enableNext()">Next</el-button></div>
+              </div> 
+            </el-tab-pane>
+            <el-tab-pane label="Review and Run Case" name="runCase" :disabled="unicorn.flowControl.runCase">
+              <div class="filemanagerDiv" :style="canvasStyle" style="overflow-y:auto">
+                <textarea v-model="unicorn.previewCmd" style="width:100%;min-height:100px"></textarea>
+                <el-button size="mini" type="primary" @click="runUnicornCmd">Run</el-button>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </el-tab-pane>
+        <el-tab-pane label="Inspect UI" name = "inspector">
+          <ui-inspector :rtcpc="pc" :uri="appiumUri" :caps="appiumCaps" :result="inspectorResult" :sessionid="appiumSessionID" @screenshot="takeScreenShot" :imagedata="screenShot"></ui-inspector>
+        </el-tab-pane>
+        <el-tab-pane label="Allure Reports" name = "reports">
+          <a :href="AllureReportUrl" target="blank">Open Report Site </a>
+          <iframe :src="AllureReportUrl" :style="iframeStyle"></iframe>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+  </div>
+
+
+</div>
+{% end %}
+
+{% block script %}
+<script src="{{static_url('javascripts/popper.min.js')}}"></script>
+<script src="{{static_url('javascripts/clipboard.min.js')}}"></script>
+<script src="{{static_url('javascripts/xterm.min.js')}}"></script>
+<script src="{{static_url('javascripts/fit.min.js')}}"></script>
+<script src="{{static_url('javascripts/ResizeSensor.min.js')}}"></script>
+<script src="{{static_url('javascripts/imagepool.js')}}"></script>
+<script src="{{static_url('javascripts/ui_inspector.js')}}"></script>
+<script src="{{static_url('javascripts/RecordRTC.js')}}"></script>
+<script src="{{static_url('javascripts/xml2json.min.js')}}"></script>
+<script src="{{static_url('vendor/vue-json-viewer/vue-json-viewer.js')}}"></script>
+<!-- <script src="{{static_url('vendor/vue-json-viewer/ssr.js')}}"></script> -->
+<script>
+
+  Vue.use(JsonView.default)
+  jQuery.delay = function (ms, value) {
+    var defer = new jQuery.Deferred();
+    setTimeout(function () { defer.resolve(value); }, ms || 0);
+    return defer.promise();
+  };
+
+  const udid = "{{udid}}"
+  const proxy = "{{proxy}}"
+  const userEmail = "{{current_user.email}}"
+  const iceConfig = JSON.parse(`{{turnservers}}`.replaceAll("&quot;", "\""))
+
+  $.getJSON("/api/v1/user/devices/" + udid)
+    .then(ret => {
+      vm = new Vue({
+        el: "#content-wrapper",
+        data: Object.assign({
+          activeName: 'common',
+          canvas: {
+            bg: null,
+            fg: null,
+          },
+          pc : null,
+          chMiniTouch: null,
+          chCmd: null,
+          inspectorResult: "",
+          appiumSessionID: "",
+          videoElement: null,
+          screenShot: null,
+          rotation: 0,
+          log: console.log,
+          shellOutputChannel : "debug",
+          canvasStyle: {
+            opacity: 1,
+            width: '400px',
+            height: '200px',
+            maxHeight: "unset",
+          },
+          rotation: 0,
+          term: null, // Terminal object
+          websockets: {
+            screen: null,
+            touchpad: null,
+            winput: null,
+          },
+          whatsinput: {
+            text: "",
+            disabled: true,
+          },
+          topApp: {
+            packageName: '',
+            activity: '',
+            pid: '',
+          },
+          imagePool: new ImagePool(100),
+          browserUrl: "",
+          app: {
+            installUrl: "",
+            finished: true,
+            packageName: "",
+            message: "",
+            launch: true,
+          },
+          packages: [],
+          userSettings: Object.assign({
+            inputName: '',
+            inputCommand: '',
+            visible: false,
+            shortcuts: [{
+              command: "input keyevent POWER",
+              name: 'Delete',
+            }]
+          }, {}),
+          phoneFiles: [],
+          phoneDir: "",
+          imgToDraw: [],
+          unicorn:{
+            activeName: "chooseFeature",
+            flowControl:{
+              chooseFeture:false,
+              chooseTag: true,
+              chooseUser: true,
+              runCase: true
+            },
+            platform:"Android",
+            udid:"",
+            appiumUrl:"",
+            selectedTag:[],
+            tags:[],
+            selectedDir:"",
+            fileOrFolders:[],
+            enableNext() {
+              switch(this.activeName){
+                case "chooseFeature":
+                  if(this.selectedDir.endsWith(".feature")){
+                    return true
+                  }
+                  for(i=0; i< this.fileOrFolders.length;i ++) {
+                    if(this.fileOrFolders[i].endsWith(".feature")){
+                      return true
+                    } 
+                  }
+                  break
+                case "chooseTag":
+                  if(this.selectedTag.length > 0) {
+                    this.flowControl.runCase = false
+                    return true
+                  }
+                  break
+              }
+              return false
+            },
+            genCmd(){
+              // return "cmds"+this.udid+this.selectedDir+this.selectedTag.join(",")
+              localAppiumUrl = "http://localhost:"+this.appiumUrl.split(":")[2]
+              return "cd $UNICORN_HOME && export APPIUM_SERVER_URL="+localAppiumUrl+" && export ReportFolder=unicorn &&  $ALLURE_PROJECTS/createfolder.sh $ReportFolder && python3 -m behave ."+this.selectedDir+" -D platform="+this.platform+" -D udid="+this.udid+" -t="+this.selectedTag.join(",")+" -f allure_behave.formatter:AllureFormatter -o $ALLURE_PROJECTS/$ReportFolder/results"
+            },
+            previewCmd: "",
+          },
+          recording:false,
+          recordingColor(){
+            if(this.recording){
+              return "red"
+            }
+            return "gray"
+          },
+          recorder:null,
+        }, ret.device),
+        methods: {
+          toggleRecord(){
+            if(this.recorder == null) {
+              alert("recorder not ready,retry later!")
+            }
+            let rec = this.recorder
+            if(!this.recording){
+              this.recording = true
+              rec.startRecording()
+            }else {
+              this.recording= false
+              rec.stopRecording().then(function(){
+                rec.getBlob().then(blob => invokeSaveAsDialog(blob, "record.webm"))
+              })
+            }
+          },
+          debug() {
+            console.log(...arguments);
+          },
+          onUpload(resp, file, files) {
+            if (!resp.success) {
+              this.$message({
+                message: resp.description,
+                type: "error"
+              })
+              return
+            }
+            this.app.installUrl = window.location.origin+"/uploads/" + resp.data.url;
+            this.appInstall()
+          },
+          appInstall() {
+            if (!this.term) {
+                this.loadTerminal()
+            }
+            this.activeName='terminal';
+
+            let cmd = "curl  -s '"+this.source.url+"/app/install?udid="+this.udid+
+            "' -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' --data-raw 'url="+
+            this.app.installUrl
+            +"&launch="+
+            this.app.launch+"&secret="+this.source.secret+"'"
+
+            this.term.write(cmd+"\n\r")
+            this.runHostShell(cmd, "terminal")
+            // this.app.packageName = ""
+            // this.app.finished = false
+            // this.app.message = "installing ..."
+            
+            // curl  -s 'http://localhost:3500/app/install?udid=12abd4b2' -H 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' --data-raw 'url=http%3A%2F%2F10.10.56.238%3A4000%2Fuploads%2F83%2F50c984ff55078af6b0bb0a64c2877c%2FGrab.apk&launch=true&secret=AGZ9A8UPQA'
+            // $.ajax({
+            //   method: "post",
+            //   url: this.source.url + "/app/install?udid=" + this.udid,
+            //   data: {
+            //     url: this.app.installUrl,
+            //     launch: this.app.launch,
+            //     secret: this.source.secret,
+            //   }
+            // }).done(ret => {
+            //   this.app.message = ret.output;
+            //   this.app.packageName = ret.packageName;
+            // }).fail(err => {
+            //   if (err.status == 400) {
+            //     this.app.message = err.responseJSON.description;
+            //   } else {
+            //     this.app.message = err.responseText;
+            //   }
+            // }).always(() => {
+            //   this.app.finished = true
+            // })
+          },
+          appLaunch(packageName) {
+            $.ajax({
+              url: `${this.deviceUrl}/session/${packageName}`,
+              method: "post"
+            }).then(ret => {
+              console.log(ret)
+            })
+          },
+          addTopAppToShortcut() {
+            this.$prompt('Give a name to  <code>' + this.topApp.packageName + '</code>', 'Add Shortcuts', {
+              confirmButtonText: 'OK',
+              cancelButtonText: 'Cancel',
+              dangerouslyUseHTMLString: true,
+            }).then(({ value }) => {
+              let command = ["monkey", "-p", this.topApp.packageName, "-c", "android.intent.category.LAUNCHER", "1"].join(" ")
+              this.addShortcut(value, command)
+            }).catch(() => {
+            })
+          },
+          fixInputMethod(quite) {
+            if (!quite) {
+              this.$notify.info({
+                title: "Ime",
+                message: "fixing",
+              })
+            }
+            const inputMethod = "com.buscode.whatsinput/.WifiInputMethod"
+            return this.runShell("ime enable " + inputMethod)
+              .then(() => {
+                return this.runShell("ime set " + inputMethod)
+              })
+              .then($.delay(1000))
+              .then(() => {
+                this.$refs.whatsinput.focus()
+                return this.loadWhatsinput()
+              })
+              .then(() => {
+                if (!quite) {
+                  this.$notify.success({ message: "Ime fixed" })
+                }
+              }, () => {
+                if (!quite) {
+                  this.$notify.success({ message: "Failed to fix Ime, press F12 to check details" })
+                }
+              })
+          },
+          loadWhatsinput(callback) {
+            console.log(this.whatsInputUrl)
+            let defer = $.Deferred()
+            let ws = new WebSocket(this.whatsInputUrl)
+            this.websockets.winput = ws;
+            ws.onopen = (ev) => {
+              defer.resolve()
+              console.log("whatsinput connected")
+            }
+            ws.onmessage = (ev) => {
+              console.log("winput recv", ev)
+              let data = JSON.parse(ev.data)
+              switch (data.type) {
+                case "InputStart":
+                  this.whatsinput.text = data.text;
+                  this.whatsinput.disabled = false
+                  setTimeout(() => {
+                    this.$refs.whatsinput.focus()
+                    this.$refs.whatsinput.select()
+                  }, 1)
+                  break;
+                case "InputFinish":
+                  this.whatsinput.disabled = true
+                  break
+                case "InputChange":
+                  this.whatsinput.text = data.text;
+                  break;
+              }
+            }
+            ws.onerror = (ev) => {
+              console.error(ev)
+              defer.reject()
+            }
+            ws.onclose = (ev) => {
+              console.log("winput closed")
+              if (ws === this.websockets.winput) {
+                this.websockets.winput = null;
+              }
+            }
+            return defer;
+          },
+          sendInputText() {
+            console.log("sync", this.whatsinput.text)
+            let ws = this.websockets.winput;
+            ws.send(JSON.stringify({
+              type: "InputEdit",
+              text: this.whatsinput.text,
+            }))
+          },
+          sendInputKey(key) {
+            console.log("Sync key", key)
+            let code = { "enter": 66, "tab": 61 }[key] || key;
+            let ws = this.websockets.winput;
+            ws.send(JSON.stringify({
+              type: "InputKey",
+              code: "" + code,
+            }))
+          },
+          loadUserSettings() {
+            return $.getJSON("/api/v1/user/settings").then(ret => {
+              this.userSettings.shortcuts = ret.shortcuts || []
+            })
+          },
+          updateUserSettings() {
+            return $.ajax({
+              method: "put",
+              url: "/api/v1/user/settings",
+              dataType: "json",
+              data: JSON.stringify({
+                "shortcuts": this.userSettings.shortcuts,
+              })
+            }).then(ret => {
+              console.log("configuration updated")
+            })
+          },
+          triggerShortcut(v) {
+            return this.runShell(v.command).done(ret => {
+              this.$notify({
+                dangerouslyUseHTMLString: true,
+                message: "CMD: <code>" + v.command + "</code><br>Output: <code>" + ret.output + "</code>",
+              })
+              console.log("Shell", v.command, "output", ret)
+            })
+          },
+          addShortcut(name, command) {
+            if (!name || !command) {
+              return
+            }
+            let s = this.userSettings;
+            s.shortcuts.push({ name, command })
+            s.inputName = ""
+            s.inputCommand = ""
+            s.visible = false;
+            return this.updateUserSettings()
+          },
+          removeShortcut(c) {
+            this.userSettings.shortcuts = this.userSettings.shortcuts.filter(v => {
+              return v.name != c.name
+            })
+            return this.updateUserSettings()
+          },
+          hotfix() {
+            // 修复屏幕旋转问题
+            // this.$notify({
+            //   message: "Hotfixing",
+            //   position: 'top-left',
+            //   duration: 1000,
+            // })
+            $.ajax({
+              method: "get",
+              url: this.deviceUrl + "/info/rotation"
+            }).done(ret => {
+              this.$notify({
+                message: "Rotation updated",
+                position: 'bottom-left',
+                duration: 1000,
+              })
+            })
+          },
+          stopUsing() {
+            if(this.pc) {
+              try {
+                this.pc.close()
+              }catch(e) {
+                console.log(e)
+              }
+            }
+            $.ajax({
+              method: "delete",
+              url: "/api/v1/user/devices/" + this.udid,
+              dataType: "json"
+            }).always(() => {
+              window.close()
+            })
+          },
+          openBrowser(url) {
+            if (!/^https?:\/\//.test(url)) {
+              url = "http://" + url;
+            }
+            this.browserUrl = ""
+            return this.runShell("am start -a android.intent.action.VIEW -d " + url);
+          },
+          runShell(command, backChannel) {
+            if(backChannel == undefined || backChannel == "") {
+              backChannel = "debug"
+            }
+            if(this.chCmd != null && this.chCmd.readyState == "open") {
+              this.chCmd.send("adb shell \"echo **channel**"+backChannel+"** && "+command+"\"")
+              console.log("runShell", command)
+              return
+            }
+            console.log("runShell:", " cmdChannel is not ready")
+          },
+          runHostShell(command, backChannel) {
+            if(backChannel == undefined || backChannel == "") {
+              backChannel = "**channel**hostshell**"
+            }
+            if(this.chCmd != null && this.chCmd.readyState == "open") {
+              this.chCmd.send("echo **channel**"+backChannel+"** &&"+command)
+              console.log("runHostShell", command)
+              return
+            }
+            console.log("runHostShell:", " cmdChannel is not ready")
+          },
+          runKeyevent(key) {
+            return this.runShell("input keyevent " + key.toUpperCase())
+          },
+          handleTabClick(tab, event) {
+            console.log(tab.name)
+            if (tab.name == "terminal") {
+              if (!this.term) {
+                this.loadTerminal()
+              }
+            }
+            if (tab.name == "filemanager") {
+              this.getPhoneFile();
+            }
+            if (tab.name == "packagemanager") {
+              if (!this.packages.length) {
+                this.loadPackages()
+              }
+            }
+            if (tab.name == "unicorn") {
+              this.unicorn.udid = this.udid
+              this.unicorn.appiumUrl=this.appiumUri
+              this.getUnicornFile()
+            }
+          },
+          handleUnicornSteps(tab, event){
+            console.log(tab.name)
+            switch(tab.name) {
+              case "chooseFeature":
+                this.getUnicornFile(this.unicorn.selectedDir)
+                break
+              case "chooseTag":
+                this.loadUnicornTags(this.unicorn.selectedDir)
+                break
+              case "runCase":
+                this.loadUnicornCmd()
+                break
+            }
+            return
+          },
+          loadUnicornTags(dirOrFile) {
+            if(dirOrFile.endsWith(".feature")) {
+              // a file, scan the file
+              this.runHostShell('cat $UNICORN_HOME' + this.unicorn.selectedDir + ' | grep @ | grep -v \"When\\|Then\\|And\\|#\\|Scenario\"', "unicorn_tags")
+            } else {
+              // a folder, scan all .feature files in this folder
+              this.runHostShell('cat $UNICORN_HOME' + this.unicorn.selectedDir + '/*.feature  | grep @ | grep -v \"When\\|Then\\|And\\|#\\|Scenario\"', "unicorn_tags")
+            }
+          },
+          updateSelectedTags(tags){
+              this.unicorn.selectedTag=tags
+              if(tags > 0) {
+                this.unicorn.flowControl.chooseUser = false
+              }
+          },
+          loadUnicornCmd(){
+            this.unicorn.previewCmd = this.unicorn.genCmd()
+          },
+          runUnicornCmd(){
+            
+            if (!this.term) {
+                this.loadTerminal()
+            }
+            this.activeName='terminal';
+            let cmd = this.unicorn.previewCmd
+            this.term.write(cmd+"\n\r")
+            this.runHostShell(cmd, "terminal")
+          },
+          loadTerminal() {
+            let vueApp = this
+            let term = new Terminal({
+                screenKeys: true,
+                useStyle: true,
+                cursorBlink: true
+              })
+            let cmd = ""
+            term.on('data', data => {
+              // console.log(data.charCodeAt(0))
+              term.write(data)
+              if(data && data.length > 0 && data.charCodeAt(0) == 127) {
+                term.write("\r")
+                for(let i = 0; i < cmd.length; i ++) {
+                  term.write(' ')
+                }
+                term.write("\r")
+                cmd = cmd.slice(0, cmd.length-1)
+                term.write(cmd)
+                return
+              }
+              cmd = cmd + data
+              if(cmd.length > 1 && cmd[cmd.length-1] == '\n' || cmd[cmd.length-1] == '\r'){
+                vueApp.runHostShell(cmd.replace("\r", "").replace("\n", ""), "terminal")
+                cmd = ""
+                term.write("\n\r")
+              }
+            })
+
+            term.open(this.$refs.xterm, { focus: true });
+            term.fit()
+            vueApp.term = term
+            new ResizeSensor(this.$refs.xterm, function (e) {
+              console.log("Resize", e)
+              term.resize()
+              term.fit()
+            })
+
+            // ws.onmessage = (evt) => {
+            //   if (evt.data instanceof ArrayBuffer) {
+            //     term.write(ab2str(evt.data))
+            //   } else {
+            //     alert(evt.data)
+            //   }
+            // }
+
+            // ws.onclose = (evt) => {
+            //   term.write("Session terminated");
+            //   term.destroy()
+            // }
+
+            // ws.onerror = (evt) => {
+            //   console.log(evt)
+            // }
+          },
+          getPhoneFile(dir) {
+            if (!dir || dir == "/sdcard") {
+              this.phoneDir = "/sdcard";
+            } else if (dir == "..") {
+              if (this.phoneDir.indexOf("/") == this.phoneDir.lastIndexOf("/")){
+                this.phoneDir = "/sdcard";
+              } else {
+                this.phoneDir = this.phoneDir.substr(0, this.phoneDir.lastIndexOf("/"));
+              }
+            } else if (dir == this.phoneDir) {
+              this.phoneDir = dir;
+            } else {
+              this.phoneDir = this.phoneDir + "/" + dir;
+            }
+            this.runShell('ls \"' + this.phoneDir + '/\"', "filemanager")
+          },
+          getUnicornFile(dir) {
+            if (!dir || dir == "/features") {
+              this.unicorn.selectedDir = "/features";
+            } else if (dir == "..") {
+              if (this.unicorn.selectedDir.indexOf("/") == this.unicorn.selectedDir.lastIndexOf("/")){
+                this.unicorn.selectedDir = "/features";
+              } else {
+                this.unicorn.selectedDir = this.unicorn.selectedDir.substr(0, this.unicorn.selectedDir.lastIndexOf("/"));
+              }
+            } else if (dir == this.unicorn.selectedDir) {
+              this.unicorn.selectedDir = dir;
+            } else {
+              this.unicorn.selectedDir = this.unicorn.selectedDir + "/" + dir;
+            }
+            this.runHostShell('ls \"$UNICORN_HOME' + this.unicorn.selectedDir + '\"', "unicorn")
+          },
+          loadPackages() {
+            return this.runShell("pm list packages -3", "packagemanager")
+            // .then(ret => {
+            //   let packages = []
+            //   ret.output.split(/\r?\n/).forEach(v => {
+            //     if (v.startsWith("package:")) {
+            //       const packageName = v.substr("package:".length)
+            //       let item = {
+            //         key: packageName,
+            //         name: packageName,
+            //         label: "",
+            //         versionName: "",
+            //         versionCode: "",
+            //       }
+            //       $.getJSON(`${this.deviceUrl}/packages/${packageName}/info`).then(ret => {
+            //         if (ret.success && ret.data) {
+            //           item.label = ret.data.label
+            //           item.versionName = ret.data.versionName
+            //           item.versionCode = ret.data.versionCode
+            //           console.log(packageName, ret.data)
+            //         }
+            //       })
+            //       packages.push(item)
+            //     }
+            //   })
+            //   this.packages = packages;
+            // })
+          },
+          removePackage(packageName) {
+            if (!confirm(`Uninstall ${packageName} ?`)) {
+              return
+            }
+            return this.runShell(`pm uninstall ${packageName}`, "removePackage").then(() => {
+              const index = this.packages.findIndex((v) => {
+                return v.name == packageName
+              })
+              this.packages.splice(index, 1)
+            })
+          },
+          processShellOutput(msg)  {
+            if(!msg){
+              return
+            }
+            vueApp = this
+            let outputChannel = vueApp.shellOutputChannel
+            if(msg.indexOf("**channel**")>-1) {
+              msgpart = msg.replace("\n", "").replace("**channel**", "").split("**")
+              vueApp.shellOutputChannel = msgpart[0]
+              outputChannel = msgpart[0]
+              console.log("Set Output Channel to '"+outputChannel+"'")
+              switch(outputChannel){
+                // if filemanager & pkg Manager, clear existing data first. 
+                case "filemanager":
+                    vueApp.phoneFiles = []
+                  break
+                case "packagemanager":
+                  vueApp.packages = []
+                  break
+                case "unicorn":
+                  vueApp.unicorn.fileOrFolders = []
+                  break
+                case "unicorn_tags":
+                  vueApp.unicorn.tags = []
+                  break
+              }
+              if(msgpart.length == 2 && msgpart[1]  ==  "") {
+                return
+              }
+              msg = msgpart[1]
+            }
+            console.log("output for channel "+outputChannel + "\n" + msg)
+            switch(outputChannel) {
+              case "topapp":
+                const reActivity = String.raw`\s*ACTIVITY ([A-Za-z0-9_.]+)\/([A-Za-z0-9_.]+) \w+ pid=(\d+)`
+                let matches = msg.match(new RegExp(reActivity, "g"))
+                if(!matches){
+                  return
+                }
+                let m = matches.pop().match(new RegExp(reActivity))
+                vueApp.topApp.packageName = m[1];
+                vueApp.topApp.activity = m[2]
+                vueApp.topApp.pid = m[3]
+                break
+              case "filemanager":
+                let files = msg.trim("\n").split("\n")
+                for(let i = 0; i < files.length; i ++){
+                  vueApp.phoneFiles.push(files[i])
+                }
+                break
+              case "packagemanager":
+                let pkgs = msg.trim("\n").split(/\r?\n/)
+                let packages = []
+                pkgs.forEach(v => {
+                  if (v.startsWith("package:")) {
+                    const packageName = v.substr("package:".length)
+                    let item = {
+                      key: packageName,
+                      name: packageName,
+                      label: "",
+                      versionName: "",
+                      versionCode: "",
+                    }
+                    $.getJSON(`${this.deviceUrl}/packages/${packageName}/info`).then(ret => {
+                      if (ret.success && ret.data) {
+                        item.label = ret.data.label
+                        item.versionName = ret.data.versionName
+                        item.versionCode = ret.data.versionCode
+                        console.log(packageName, ret.data)
+                      }
+                    })
+                    packages.push(item)
+                  }
+                })
+                vueApp.packages = packages;
+                break
+              case "terminal":
+                outputs = msg.split("\n")
+                for(let i = 0; i < outputs.length;i ++){
+                  if(outputs[i].trim().length < 1) {
+                    continue
+                  }
+                  vueApp.term.write(outputs[i]+"\n\r")
+                }
+                break
+              case "unicorn":
+                let unicornFiles = msg.trim("\n").split("\n")
+                for(let i = 0; i < unicornFiles.length; i ++){
+                  vueApp.unicorn.fileOrFolders.push(unicornFiles[i])
+                }
+                break
+              case "unicorn_tags":
+                let tags = msg.replaceAll("\n", " ").replaceAll(" ", "").split("@")
+                let newTags = vueApp.unicorn.tags
+                for(i=0; i< tags.length; i ++){
+                  let tag =  tags[i]
+                  if(tag != "") {
+                    let tagWithAt = "@"+tag
+                    if(newTags.indexOf(tagWithAt) < 0) {
+                      newTags.push(tagWithAt)
+                    }
+                  }
+                }
+                vueApp.unicorn.tags = newTags
+                break
+              default:
+                console.log(msg)
+                break
+            }
+          },
+          fitCanvas(canvas) {
+            if (canvas.width > canvas.height) {
+              // 横屏显示，宽高相等
+              this.canvasStyle.maxHeight = canvas.parentElement.clientHeight + "px";
+              this.canvasStyle.height = "auto"
+              this.canvasStyle.width = canvas.parentElement.clientHeight + "px"
+            } else {
+              this.canvasStyle.maxHeight = "unset"
+              this.canvasStyle.height = canvas.parentElement.clientHeight + "px"
+              this.canvasStyle.width = "auto"
+            }
+          },
+          closeWindowWhenReleased(interval) {
+            setTimeout(() => {
+              if (document.hidden) {
+                $.getJSON("/api/v1/user/devices/" + udid)
+                  .done(ret => {
+                    this.closeWindowWhenReleased(5000)
+                  })
+                  .fail(ret => {
+                    let content = 'No Operation to device in ' + this.idleTimeout + "seconds，released, click refresh to take control again"
+                    this.$alert(content, 'Device Timeout', {
+                      confirmButtonText: 'Refresh',
+                      type: 'warning'
+                    }).then(() => {
+                      location.reload()
+                    }).catch(() => {
+                      window.close()
+                    })
+                  })
+              } else {
+                $.getJSON("/api/v1/user/devices/" + udid + "/active")
+                  .done((ret) => {
+                    this.closeWindowWhenReleased(interval)
+                  })
+                  .fail(function (ret) {
+                    console.log(ret)
+                    alert("Device is released，Press F12 to debug")
+                  })
+              }
+            }, interval)
+          },
+          initClipboardJS() {
+            var clipboard = new ClipboardJS(".clipboard-copy")
+
+            clipboard.on('success', function (e) {
+              e.clearSelection()
+              showTooltip(e.trigger, "Copied!")
+            })
+
+            document.querySelectorAll(".clipboard-copy").forEach(e => {
+              e.addEventListener('mouseleave', clearTooltip);
+              e.addEventListener('blur', clearTooltip);
+            })
+
+            function clearTooltip(e) {
+              const target = e.currentTarget;
+              setTimeout(() => {
+                target.innerHTML = ""
+              }, 200)
+            }
+
+            function showTooltip(elem, msg) {
+              elem.innerHTML = "&nbsp;<small>" + msg + "</small>"
+            }
+          },
+          AddRemoteControl(videoElement) {
+            let vueElement = this
+            Object.assign(videoElement, {
+              rotation: 0,
+              autoplay: true, 
+              controls: false,
+              onpause(e){
+                vueElement.play()
+              },
+              oncontextmenu(e) {
+                return false
+              },
+              /* remote control communicate with minitouch */
+              coords(boundingW, boundingH, relX, relY, rotation) {
+                /**
+              * Rotation affects the screen as follows:
+              *
+              *             0deg
+              *           |------|
+              *           | MENU |
+              *           |------|
+              *      -->  |      |  --|
+              *      |    |      |    v
+              *           |      |
+              *           |      |
+              *           |------|
+              *        |----|-|          |-|----|
+              *        |    |M|          | |    |
+              *        |    |E|          | |    |
+              *  90deg |    |N|          |U|    | 270deg
+              *        |    |U|          |N|    |
+              *        |    | |          |E|    |
+              *        |    | |          |M|    |
+              *        |----|-|          |-|----|
+              *           |------|
+              *      ^    |      |    |
+              *      |--  |      |  <--
+              *           |      |
+              *           |      |
+              *           |------|
+              *           | UNEM |
+              *           |------|
+              *            180deg
+              *
+              * Which leads to the following mapping:
+              *
+              * |--------------|------|---------|---------|---------|
+              * |        | 0deg |  90deg  |  180deg |  270deg |
+              * |--------------|------|---------|---------|---------|
+              * | CSS rotate() | 0deg | -90deg  | -180deg |  90deg  |
+              * | bounding w   |  w   |    h    |    w    |    h    |
+              * | bounding h   |  h   |    w    |    h    |    w    |
+              * | pos x        |  x   |   h-y   |   w-x   |    y    |
+              * | pos y        |  y   |    x    |   h-y   |   h-x   |
+              * |--------------|------|---------|---------|---------|
+              */
+                var w, h, x, y;
+
+                switch (rotation) {
+                  case 0:
+                    w = boundingW
+                    h = boundingH
+                    x = relX
+                    y = relY
+                    break
+                  case 90:
+                    w = boundingH
+                    h = boundingW
+                    x = boundingH - relY
+                    y = relX
+                    break
+                  case 180:
+                    w = boundingW
+                    h = boundingH
+                    x = boundingW - relX
+                    y = boundingH - relY
+                    break
+                  case 270:
+                    w = boundingH
+                    h = boundingW
+                    x = relY
+                    y = boundingW - relX
+                    break
+                }
+
+                return {
+                  xP: x / w,
+                  yP: y / h,
+                }
+              },
+              getRotation(){
+                if (!vueElement.chMiniTouch || vueElement.chMiniTouch.readyState != "open") {
+                  this.rotation = 0
+                  return
+                }
+                vueElement.chMiniTouch.send("NMT:/info/rotation")
+                if(vueElement.canvas.bg.width < videoElement.width) {
+                  videoElement.style.height = "auto"
+                  videoElement.style.maxWidth = vueElement.canvas.bg.style.maxWidth
+                  videoElement.style.maxHeight = vueElement.canvas.bg.style.maxHeight
+                  videoElement.style.width = vueElement.canvas.bg.style.width
+                } else if (vueElement.canvas.bg.height < videoElement.height){
+                  videoElement.style.height = vueElement.canvas.bg.height
+                  videoElement.style.maxWidth = vueElement.canvas.bg.style.maxWidth
+                  videoElement.style.maxHeight = vueElement.canvas.bg.style.maxHeight
+                  videoElement.style.width = "auto"
+                }else {
+                  videoElement.style.height = "auto"
+                  videoElement.style.width = "auto"
+                  videoElement.style.maxWidth = vueElement.canvas.bg.style.maxWidth
+                  videoElement.style.maxHeight = vueElement.canvas.bg.style.maxHeight
+                }
+              },
+              syncTouchpad(element){
+                console.log("start of syncTouchpad")
+                let channel = vueElement.chMiniTouch
+                if (!channel || channel.readyState != "open") {
+                  console.log("minitouch channel not ready")
+                  return
+                }
+                
+                let touchSync = function(operation, event){
+                  var e = event;
+                  if (e.originalEvent) {
+                      e = e.originalEvent
+                  }
+                  e.preventDefault()
+                  
+                  let x = e.offsetX, y = e.offsetY
+                  let w = e.target.clientWidth, h = e.target.clientHeight
+                  let scaled = element.coords(w, h, x, y, vueElement.rotation);
+                  channel.send(JSON.stringify({
+                      operation: operation, // u, d, c, w
+                      index: 0,
+                      pressure: 0.5,
+                      xP: scaled.xP,
+                      yP: scaled.yP,
+                  }))
+                  channel.send(JSON.stringify({ operation: 'c' }))
+                }
+                let mouseMoveListener = function(event) {
+                  touchSync('m', event)
+                }
+                let mouseUpListener = function(event) {
+                  touchSync('u', event)
+                  element.removeEventListener('mousemove', mouseMoveListener);
+                  document.removeEventListener('mouseup', mouseUpListener);
+                }
+                let mouseDownListener = function(event) {
+                  touchSync('d', event)
+                  element.addEventListener('mousemove', mouseMoveListener);
+                  document.addEventListener("mouseup", mouseUpListener)
+                }
+                element.addEventListener("mousedown", mouseDownListener)
+              }
+            })
+            videoElement.addEventListener("loadeddata", e => {
+              videoElement.syncTouchpad(videoElement)
+            })
+            
+            videoElement.addEventListener("resize", videoElement.getRotation)
+            return videoElement
+          },
+          refreshTopApp() {
+            this.runShell("dumpsys activity top | grep ACTIVITY", "topapp")
+            // .then(ret => {
+            //   const reActivity = String.raw`\s*ACTIVITY ([A-Za-z0-9_.]+)\/([A-Za-z0-9_.]+) \w+ pid=(\d+)`
+            //   let matches = ret.output.match(new RegExp(reActivity, "g"))
+            //   if (matches.length > 0) {
+            //     let m = matches.pop().match(new RegExp(reActivity))
+            //     this.topApp.packageName = m[1];
+            //     this.topApp.activity = m[2]
+            //     this.topApp.pid = m[3]
+            //   }
+            // })
+          },
+          takeScreenShot(){
+            let videoElement = this.videoElement
+            let canvas = document.createElement("canvas");
+            canvas.width=videoElement.clientWidth
+            canvas.height=videoElement.clientHeight
+            let ctx = canvas.getContext('2d')
+            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+            let dataURI=canvas.toDataURL()
+            console.log(dataURI, canvas, videoElement)
+            this.screenShot = dataURI
+          }
+        },
+        mounted: function () {
+          this.canvas.bg = this.$refs.bgCanvas
+
+          new ResizeSensor(this.canvas.bg.parentElement, (e) => {
+            this.fitCanvas(this.canvas.bg)
+          })
+
+          // 常用功能面板 自适应
+          new ResizeSensor(this.$refs.commonContainer, (e) => {
+            let el = this.$refs.commonContainer
+            if (e.width < 750) {
+              el.style.columnCount = 1
+            } else {
+              el.style.columnCount = 2
+            }
+          })
+
+          // 更新使用时间
+          setInterval(() => {
+            let duration = moment.now() - moment(this.usingBeganAt)
+            this.$refs.usingTime.innerHTML = moment.utc(duration).format("HH:mm:ss")
+          }, 1000)
+
+
+          let pc = new RTCPeerConnection(iceConfig)
+          this.pc = pc
+          let vueApp = this
+          pc.ontrack = function (event) {
+            var el = document.createElement(event.track.kind)
+            el.srcObject = event.streams[0]
+            el = vueApp.AddRemoteControl(el)
+            el.autoplay = true
+            el.style.height = "100%"
+            vueApp.canvas.bg.appendChild(el)
+            vueApp.videoElement = el
+            vueApp.recorder = new RecordRTCPromisesHandler(event.streams[0], {type:'video'})
+          }
+          pc.addTransceiver('video', {'direction':"recvonly"})
+          channel = pc.createDataChannel("minitouch")
+          channel.onopen  = function(e){
+              console.log("minitouch channel open", e)
+              console.log("minitouch connected")
+              channel.send(JSON.stringify({ // touch reset, fix when device is outof control
+                    operation: "r",
+              }))
+          }
+          channel.onclose = function(e){
+              console.log("minitouch closed")
+          }
+          channel.onmessage = function(e){
+            if(this.videoElement && this.videoElement.pasusd) {
+              try{
+                this.videoElement.play()
+              }catch{}
+            }
+            console.log("minitouch msg", e)
+            try {
+              json = JSON.parse(e.data)
+              if (json) {
+                console.log("resized:", json)
+                vueApp.rotation = json.rotation
+              } 
+            }catch(e)  {
+              console.log("resized exception:", 0)
+              vueApp.rotation = 0
+            }
+          }
+          this.chMiniTouch = channel
+
+          let dec = new TextDecoder("ascii")
+          let cmdChannel = pc.createDataChannel('CMD')
+          cmdChannel.onclose = () => console.log('cmdChannel has closed')
+          cmdChannel.onopen = () => {
+            console.log('cmdChannel has opened')
+            for(i = 0; i< 10 ; i ++ ){
+              cmdChannel.send("adb shell input keyevent HOME")
+            }
+          }
+          cmdChannel.onmessage = e => {
+            let msg = e.data
+            if (typeof(msg) !== "string"){
+              console.log('decoding')
+              msg = dec.decode(msg)
+              // msg = msg.split('\n').join("<br>")
+              vueApp.processShellOutput(msg)
+            }
+            console.log(`Message from DataChannel '${cmdChannel.label}' payload <br>'${msg}'`)
+          }
+          this.chCmd = cmdChannel
+          pc.oniceconnectionstatechange = e => {
+            console.log("oniceconnectionstatechange")
+            console.log(pc.iceConnectionState)
+            if(pc.iceConnectionState === "disconnected") {
+              let content = 'Network connection closed, click refresh to take control again'
+              vueApp.$alert(content, 'Device Timeout', {
+                confirmButtonText: 'Refresh',
+                type: 'warning'
+              }).then(() => {
+                location.reload()
+              }).catch(() => {
+                window.close()
+              })
+            }
+          }
+          url =  "ws://" + this.rtcAddress + "/signal"
+          console.log("rtc connect to "+url)
+          conn = new WebSocket(url);
+          conn.onclose = function (evt) {
+            console.log("rtc ws  conn.onclose")
+          };
+          conn.onmessage = function (evt) {
+            console.log("conn.onmessage")
+            var answer = JSON.parse(evt.data)
+            console.log(JSON.stringify(answer))
+            remoteSDP = new RTCSessionDescription(answer)      
+            pc.setRemoteDescription(remoteSDP).catch(console.log)
+          };
+          conn.onopen = function(evt){
+            console.log("connectionopen")
+            try {
+              pc.createOffer().then(d => {
+                pc.setLocalDescription(d)
+                console.log("offer:"+JSON.stringify(d))
+                conn.send(JSON.stringify(d))
+              })
+            } catch (e) {
+              alert(e)
+            }
+          }
+          // 唤醒屏幕
+          this.runKeyevent("WAKEUP")
+
+          // 加载用户配置
+          this.loadUserSettings()
+
+          // 加载whatsinput输入法
+          this.loadWhatsinput()
+
+          // 当设备不使用时自动退出
+          console.log("Refresh:", this.idleTimeout / 2 * 1000)
+          this.closeWindowWhenReleased(5000)
+
+          this.initClipboardJS()
+
+          // Disable WhatsInputMethod to prevent influence UIAutomation
+          // this.fixInputMethod(true)
+        },
+        computed: {
+          address() {
+            // return this.source.atxAgentAddress
+            return proxy+"/"+this.source.atxAgentAddress.replace(":", "/")
+          },
+          rtcAddress() {
+            // return this.source.webrtc
+            if(document.URL.startsWith("http://localhost")) {
+              return this.source.webrtc
+            }
+            return proxy+"/"+this.source.webrtc.replace(":", "/")
+          },
+          AllureReportUrl(){
+            return "http://"+proxy+"/"+this.source.webrtc.split(":")[0]+"/5050/allure-docker-service/projects/unicorn/reports/latest/index.html"
+          },
+          iframeStyle() {
+            let iframeHeight =  this.$el.clientHeight - 150
+            return {
+              width: '100%',
+              height: iframeHeight.toString()+'px',
+            }
+          },
+          deviceUrl() {
+            return "http://" + this.address
+          },
+          remoteTerminal() {
+            return "http://" + this.address + "/term"
+          },
+          screenshotUrl() {
+            return "http://" + this.address + "/screenshot/0"
+          },
+          remoteConnectAddr() {
+            return "adb connect " + this.source.remoteConnectAddress
+            // segs = this.source.remoteConnectAddress.split("//")
+            // return "adb connect " + proxy+"/"+this.source.remoteConnectAddress.replace(":", "/")
+          },
+          whatsInputUrl() {
+            // return "ws://" + this.source.whatsInputAddress
+            return "ws://" + proxy+"/whatsinput/"+this.source.whatsInputAddress.replace(":", "/")+"/"
+          },
+          displayLinked() {
+            return this.websockets.screen !== null;
+          },
+          appiumUri() {
+            return this.source.appiumUrl+"/wd/hub"
+          },
+          appiumCaps() {
+            return JSON.stringify({
+              'platformName': "Android",
+              'deviceName': this.properties.name,
+              'platformVersion': this.properties.version,
+              'automationName': 'UiAutomator2'
+            })
+          }
+        },
+        components: {
+          "term-snippet": {
+            props: {
+              command: String,
+              term: Object,
+            },
+            methods: {
+              run() {
+                this.term.emit("data", "adb shell "+this.command + "\n");
+                this.term.focus()
+              }
+            },
+            template: '<code style="cursor: pointer" @click="run" v-text="command"></code>'
+          }
+        }
+      })
+    })
+</script>
+{% end %}

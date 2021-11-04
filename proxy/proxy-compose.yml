@@ -1,0 +1,12 @@
+version: '3'
+services:
+  rethinkdb_proxy:
+    image: gitlab.myteksi.net:4567/quality-assurance/food-ginkgo-agents/mobilelab/rethinkdb:latest
+    # command: rethinkdb --bind all --canonical-address 10.10.56.238
+    command: rethinkdb proxy --bind all -j 10.10.56.238:29015
+    ports:
+    - "4002:8080"
+    - "29015:29015"
+    - "28015:28015"
+    deploy:
+      replicas: 1
